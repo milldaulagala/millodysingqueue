@@ -1,0 +1,62 @@
+# macOS
+.DS_Store
+._*
+
+# IntelliJ IDEA and local editor state
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Maven / Gradle / JVM generated output
+target/
+.gradle/
+.kotlin/
+build/
+out/
+*.class
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# GWT generated output outside Maven target/
+gwt-unitCache/
+.gwt-tmp/
+
+# Node.js / TypeScript / AWS CDK generated output
+node_modules/
+dist/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+cdk.out/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Local database data and backups
+.local/
+pgdata/
+backups/
+*.dump
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# Keep Maven/Gradle wrapper files, dependency lockfiles, and Liquibase
+# SQL changesets tracked. These are intentionally not ignored.

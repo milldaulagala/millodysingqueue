@@ -1,24 +1,26 @@
 package com.millodysingqueue
 
+import com.millodysingqueue.singer.SingerService
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
-import io.ktor.server.config.ApplicationConfig
+import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.testApplication
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class ApplicationTest {
     @Test
     fun `health endpoint returns an uncached JSON status`() = testApplication {
-        environment { config = ApplicationConfig("application.conf") }
+        environment { config = MapApplicationConfig() }
+        application { configureApplication(SingerService(FakeSingerRepository())) }
         val response = client.get("/api/health")
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -29,7 +31,8 @@ class ApplicationTest {
 
     @Test
     fun `frontend and compiled bootstrap are served by the application`() = testApplication {
-        environment { config = ApplicationConfig("application.conf") }
+        environment { config = MapApplicationConfig() }
+        application { configureApplication(SingerService(FakeSingerRepository())) }
         val page = client.get("/")
 
         assertEquals(HttpStatusCode.OK, page.status)
@@ -41,7 +44,8 @@ class ApplicationTest {
 
     @Test
     fun `unknown API paths and build metadata are not served as the application page`() = testApplication {
-        environment { config = ApplicationConfig("application.conf") }
+        environment { config = MapApplicationConfig() }
+        application { configureApplication(SingerService(FakeSingerRepository())) }
         for (path in listOf(
             "/api/missing",
             "/WEB-INF/classes/com/millodysingqueue/client/MillodySingQueueEntryPoint.class",

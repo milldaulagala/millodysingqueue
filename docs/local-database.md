@@ -5,7 +5,7 @@
 - PostgreSQL **17.11**, official Debian Bookworm image pinned to a multi-architecture digest in Compose and the integration test.
 - Liquibase **5.0.4** and PostgreSQL JDBC **42.7.14**, resolved through Gradle and locked with the other backend dependencies. No global Liquibase or PostgreSQL installation is required.
 - PostgreSQL 17.11 is listed in the RDS release notes. Check availability in the chosen AWS region again before deployment.
-- The Ktor application does not connect to the database or run migrations on startup yet. `/api/health` still checks the running application, not database readiness.
+- The Ktor application now connects through Exposed and HikariCP as `millody_app`. It never runs migrations on startup. `/api/health` checks the running process, not database readiness. See [Singer management](singer-management.md) and start locally with `./scripts/run.sh` after migrating.
 
 References: [PostgreSQL version policy](https://www.postgresql.org/support/versioning/), [RDS release notes](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-versions.html), [Liquibase PostgreSQL support](https://docs.liquibase.com/community/integration-guide-5-0-4/connect-liquibase-with-postgresql).
 
@@ -71,7 +71,9 @@ The initial changelog creates `app.singers`:
 | `email` | Optional; no whitespace or empty value; unique ignoring case |
 | `created_at` | Required timestamp with time zone, default current timestamp |
 
-Email casing is preserved, with a unique index on `lower(email)`. Multiple NULL emails are allowed. Later API code will trim user input before saving; format validation belongs to that API increment. Current constraints reject whitespace anywhere in a supplied email.
+The singer-management migration also enforces a case-insensitive unique singer-name/nickname pair when a nickname is provided. Mill / Bandara cannot be repeated, while Mill / Host is allowed. Missing nicknames remain optional and do not participate in this uniqueness rule.
+
+Email casing is preserved, with a unique index on `lower(email)`. Multiple NULL emails are allowed. The singer API trims user input before saving and applies practical email-format validation. Current constraints reject whitespace anywhere in a supplied email.
 
 Add new migrations under `backend/src/main/resources/db/changelog/changes/` and include them in the root XML changelog. Do not edit an applied changeset or clear checksums to hide an unexpected edit. Correct mistakes with a new changeset. The first table creation has no automatic rollback because dropping it would destroy singer data; use forward fixes and tested backups for recovery.
 

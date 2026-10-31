@@ -1,13 +1,20 @@
 package com.millodysingqueue.database
 
-import org.junit.jupiter.api.BeforeAll
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.TestInstance
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
-import org.testcontainers.postgresql.PostgreSQLContainer
-import org.testcontainers.utility.DockerImageName
-import org.testcontainers.utility.MountableFile
+import com.millodysingqueue.module
+import com.millodysingqueue.singer.DuplicateSingerEmailException
+import com.millodysingqueue.singer.DuplicateSingerNicknameException
+import com.millodysingqueue.singer.ExposedSingerRepository
+import com.millodysingqueue.singer.NewSinger
+import com.millodysingqueue.singer.SingerResponse
+import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
+import io.ktor.server.config.MapApplicationConfig
+import io.ktor.server.testing.testApplication
 import java.io.ByteArrayOutputStream
 import java.sql.Connection
 import java.sql.DriverManager
@@ -20,6 +27,19 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.TestInstance
+import org.testcontainers.junit.jupiter.Container
+import org.testcontainers.junit.jupiter.Testcontainers
+import org.testcontainers.postgresql.PostgreSQLContainer
+import org.testcontainers.utility.DockerImageName
+import org.testcontainers.utility.MountableFile
 
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -71,7 +91,7 @@ class DatabaseIntegrationTest {
     @Test
     fun `migrations rerun safely without changing their execution records`() {
         val before = changeRecords()
-        assertEquals(1, before.size)
+        assertEquals(2, before.size)
         migrate("update")
         migrate("validate")
         migrate("status")
@@ -159,6 +179,152 @@ class DatabaseIntegrationTest {
             }
         }
     }
+
+    @Test
+    fun `Exposed uses the application role persists across pools and handles conflicts`() = runBlocking {
+        val config = runtimeConfig()
+        ApplicationDatabase(config).use { managed ->
+            val repository = ExposedSingerRepository(managed.database)
+            val mill = repository.create(NewSinger("Mill", "Host", "Mill@example.com"))
+            assertTrue(mill.singerId > 0)
+            assertNotNull(mill.createdAt)
+            assertEquals("Host", mill.nickName)
+            repository.create(NewSinger("Mick", "Work Mick", null))
+            repository.create(NewSinger("Mick", null, null))
+            assertFailsWith<DuplicateSingerEmailException> {
+                repository.create(NewSinger("Another", null, "mill@EXAMPLE.COM"))
+            }
+            assertEquals(3, repository.list().size)
+        }
+        ApplicationDatabase(config).use { managed ->
+            val saved = ExposedSingerRepository(managed.database).list()
+            assertEquals(listOf("Mick", "Mick", "Mill"), saved.map { it.singerName })
+            assertTrue(saved[0].singerId < saved[1].singerId)
+        }
+    }
+
+    @Test
+    fun `runtime module serves API through pooled PostgreSQL and closes on shutdown`() {
+        testApplication {
+            environment { config = runtimeConfig() }
+            application { module() }
+            val created = client.post("/api/singers") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"singerName":"  Mill  ","email":"mill@example.com"}""")
+            }
+            assertEquals(HttpStatusCode.Created, created.status)
+            val singer = Json.decodeFromString<SingerResponse>(created.bodyAsText())
+            assertEquals("Mill", singer.singerName)
+            val duplicate = client.post("/api/singers") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"singerName":"Another","email":"MILL@example.com"}""")
+            }
+            assertEquals(HttpStatusCode.Conflict, duplicate.status)
+            val directory = client.get("/api/singers")
+            assertEquals(listOf(singer), Json.decodeFromString<List<SingerResponse>>(directory.bodyAsText()))
+            asApplication { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT singer_name FROM app.singers").use { result ->
+                        assertTrue(result.next())
+                        assertEquals("Mill", result.getString(1))
+                    }
+                }
+            }
+        }
+        asMigrator { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM pg_stat_activity WHERE usename = 'millody_app' AND application_name = 'MillodySingQueue'").use { result ->
+                    assertTrue(result.next())
+                    assertEquals(0, result.getInt(1), "Application shutdown must close pool connections")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `database access failures return safe retryable API errors`() = testApplication {
+        environment { config = runtimeConfig() }
+        application { module() }
+        assertEquals(HttpStatusCode.OK, client.get("/api/health").status)
+        asMigrator { connection ->
+            connection.createStatement().use { it.execute("REVOKE SELECT ON app.singers FROM millody_app") }
+        }
+        try {
+            val response = client.get("/api/singers")
+            assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+            assertEquals("STORAGE_UNAVAILABLE", Json.decodeFromString<com.millodysingqueue.ApiError>(response.bodyAsText()).code)
+            assertTrue(!response.bodyAsText().contains("SELECT"))
+        } finally {
+            asMigrator { connection ->
+                connection.createStatement().use { it.execute("GRANT SELECT ON app.singers TO millody_app") }
+            }
+        }
+    }
+
+    @Test
+    fun `database enforces name nickname uniqueness while allowing distinct pairs and missing nicknames`() {
+        asApplication { connection ->
+            insertSinger(connection, "Mill", nickname = "Bandara")
+            for ((name, nickname) in listOf("Mill" to "Bandara", " mill " to " BANDARA ")) {
+                assertEquals("23505", assertFailsWith<SQLException> {
+                    insertSinger(connection, name, nickname = nickname)
+                }.sqlState)
+            }
+            insertSinger(connection, "Mill", nickname = "Host")
+            insertSinger(connection, "Mick", nickname = "Bandara")
+            insertSinger(connection, "Mill")
+            insertSinger(connection, "Mill")
+        }
+    }
+
+    @Test
+    fun `concurrent registrations of the same name nickname pair save only one singer`() = runBlocking<Unit> {
+        ApplicationDatabase(runtimeConfig()).use { first ->
+            ApplicationDatabase(runtimeConfig()).use { second ->
+                val start = CompletableDeferred<Unit>()
+                val attempts = listOf(first, second).map { managed ->
+                    async {
+                        start.await()
+                        try {
+                            ExposedSingerRepository(managed.database).create(NewSinger("Mill", "Bandara", null))
+                            "created"
+                        } catch (_: DuplicateSingerNicknameException) {
+                            "conflict"
+                        }
+                    }
+                }
+                start.complete(Unit)
+                assertEquals(listOf("conflict", "created"), attempts.awaitAll().sorted())
+                val repository = ExposedSingerRepository(first.database)
+                assertEquals(1, repository.list().size)
+                repository.create(NewSinger("Mill", "Host", null))
+                assertEquals(2, repository.list().size)
+            }
+        }
+    }
+
+    @Test
+    fun `nickname database conflict reaches API as a nickname field error`() = testApplication {
+        environment { config = runtimeConfig() }
+        application { module() }
+        suspend fun register(nickname: String) = client.post("/api/singers") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"singerName":"Mill","nickName":"$nickname"}""")
+        }
+        assertEquals(HttpStatusCode.Created, register("Bandara").status)
+        val duplicate = register(" bandara ")
+        assertEquals(HttpStatusCode.Conflict, duplicate.status)
+        val error = Json.decodeFromString<com.millodysingqueue.ApiError>(duplicate.bodyAsText())
+        assertEquals("NICKNAME_ALREADY_EXISTS", error.code)
+        assertEquals(mapOf("nickName" to "nickname already exists. please choose a different nickname"), error.fieldErrors)
+        assertEquals(HttpStatusCode.Created, register("Host").status)
+    }
+
+    private fun runtimeConfig() = MapApplicationConfig(
+        "database.url" to postgres.jdbcUrl,
+        "database.user" to "millody_app",
+        "database.password" to applicationPassword,
+    )
 
     private fun migrate(command: String, output: ByteArrayOutputStream = ByteArrayOutputStream()) =
         DatabaseMigrations.execute(command, postgres.jdbcUrl, "millody_migrator", migrationPassword, output)

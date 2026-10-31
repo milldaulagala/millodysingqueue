@@ -8,7 +8,7 @@ This is a personal showcase project, developed incrementally through small, test
 
 ## Project status
 
-The application foundation serves a Java/GWT page and Kotlin/Ktor health API together. Task 1002 adds local PostgreSQL, explicit Liquibase migrations, the initial `singers` table, and disposable database integration tests. Singer-management APIs/screens, playback, and AWS deployment remain later increments. Ktor does not yet use the database at runtime.
+Task 1003 adds singer registration and a searchable directory to our Java/GWT frontend and Kotlin/Ktor JSON API. Singers are stored in PostgreSQL through Exposed SQL DSL and HikariCP, using the restricted application role. Liquibase remains responsible for explicit schema migrations. Songs, karaoke nights, editing/deleting, authentication and AWS deployment are later increments. This version is for localhost use only.
 
 ## Quick start
 
@@ -32,11 +32,11 @@ Gradle invokes `frontend/mvnw clean verify` when frontend inputs change, compile
 Start the integrated application from the repository root:
 
 ```sh
-cd backend
-./gradlew run
+# Complete the Local database setup below first.
+./scripts/run.sh
 ```
 
-Open [http://localhost:8080](http://localhost:8080). The page should show **Backend connected**. Use **Check connection** to retry. Requests time out after five seconds; failed HTTP responses, invalid health responses, and network failures display a readable error. Stop the server with **Control + C**.
+Open [http://localhost:8080](http://localhost:8080). The page shows singer registration and the directory, with our cream-orange, white and teal theme. Register a singer, refresh the page and search by name, nickname or email. See [Singer management](docs/singer-management.md) for the API, validation rules and browser checks. Stop the server with **Control + C**.
 
 Check the JSON endpoint separately:
 
@@ -50,7 +50,7 @@ Expected response:
 {"status":"UP"}
 ```
 
-This is a process health endpoint, not a database-readiness check; there is no database dependency yet.
+This is a process health endpoint, not a database-readiness check. Startup requires a reachable database; later database failures are reported by the singer API.
 
 ### Configuration
 
@@ -58,16 +58,24 @@ This is a process health endpoint, not a database-readiness check; there is no d
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Network interface to bind |
 | `PORT` | `8080` | HTTP port |
+| `APPLICATION_DB_URL` | Required | PostgreSQL JDBC URL |
+| `APPLICATION_DB_USER` | Required | Restricted application login (`millody_app` locally) |
+| `APPLICATION_DB_PASSWORD` | Required | Application database password |
 
-For example, run `PORT=8081 ./gradlew run` from `backend/` to use another port. The application defaults to localhost because authentication is not implemented yet. Container deployment will explicitly set `HOST=0.0.0.0` in a later increment. Environment variables are read directly; `.env` files are not automatically loaded.
+For example, run `PORT=8081 ./scripts/run.sh` from the repository root to use another port. The application defaults to localhost because authentication is not implemented yet. Container deployment will explicitly set `HOST=0.0.0.0` in a later increment. Ktor reads environment variables directly. The local `scripts/run.sh` helper loads the trusted `.env` and supplies local URL/user defaults for existing task 1002 files. Direct Gradle and packaged launches require the three application variables to be exported.
 
 ### Run the packaged distribution
 
-From `backend/`:
+From the repository root, with PostgreSQL started and migrated:
 
 ```sh
-./gradlew installDist
-./build/install/millodysingqueue/bin/millodysingqueue
+./backend/gradlew -p backend installDist
+set -a
+. ./.env
+APPLICATION_DB_URL=${APPLICATION_DB_URL:-jdbc:postgresql://127.0.0.1:${POSTGRES_PORT:-5432}/millodysingqueue}
+APPLICATION_DB_USER=${APPLICATION_DB_USER:-millody_app}
+set +a
+./backend/build/install/millodysingqueue/bin/millodysingqueue
 ```
 
 The distribution contains the backend, compiled frontend resources, dependencies, and launch scripts. It requires Java 21 at runtime. Its launcher can run from another working directory because assets are loaded from the classpath. The frontend WAR is only a build intermediate; Tomcat is not required.
@@ -113,6 +121,8 @@ The setup script creates an ignored `.env` with independent random passwords and
 | Liquibase | 5.0.4 |
 | PostgreSQL JDBC | 42.7.14 |
 | Testcontainers | 2.0.5 |
+| Exposed SQL DSL | 1.6.0 |
+| HikariCP | 7.1.0 |
 
 Use the wrappers for builds. Their distribution checksums are pinned. Backend dependencies are locked in `backend/gradle.lockfile`; intentional dependency changes must update and review the lockfile using `./scripts/check.sh build --write-locks` from the repository root. Frontend dependencies/plugins are declared in `frontend/pom.xml`. Keep the PostgreSQL image in Compose and the integration test aligned when upgrading it.
 
@@ -126,7 +136,7 @@ From `backend/`, run:
 
 The build compiles frontend assets if necessary. Ktor tests verify the health JSON/status/content type, cache behaviour, serving the frontend/bootstrap/CSS, and 404 responses for unknown API paths and excluded build metadata. Results are written to `backend/build/reports/tests/test/index.html`.
 
-For a browser smoke check, start the application and verify the success message. Stop the backend while leaving the page open, click **Check connection**, and verify the error message. Restart it and retry to confirm recovery. This check exercises compiled GWT code; backend tests alone do not execute browser JavaScript.
+Singer service/API tests cover normalisation, validation, JSON errors, duplicate-email conflicts and storage failures. For compiled GWT browser checks, follow [Singer management verification](docs/singer-management.md#verification); backend tests alone do not execute browser JavaScript.
 
 The complete build also runs database integration tests against an automatically created PostgreSQL container, separate from the Compose development database. Use `./scripts/check.sh` from the repository root, or `./scripts/check.sh integrationTest` for only the database suite. Docker is required for these checks; no tests are silently skipped. See the [database testing instructions](docs/local-database.md#tests-and-ci).
 
@@ -137,13 +147,13 @@ GitHub Actions runs the integrated clean build on pull requests and pushes to `m
 1. Open the repository folder.
 2. Link/import `backend/build.gradle.kts` as a Gradle project and `frontend/pom.xml` as a Maven project.
 3. Select **JDK 21** for the project SDK, Gradle JVM, and Maven runner/importer; use the project wrappers.
-4. Run the backend Gradle `run` task. It builds the frontend before starting Ktor. Stop and rerun after editing frontend source.
+4. Configure the three `APPLICATION_DB_*` environment variables in your backend Gradle `run` configuration, or use `./scripts/run.sh` in the terminal. It builds the frontend before starting Ktor. Stop and rerun after editing frontend source.
 
 Specialised GWT/Ktor IDE plugins are optional; the wrapper commands are the reference build workflow. `.editorconfig` uses four spaces for Java/Kotlin/TypeScript and two for YAML. Generated wrapper scripts retain upstream formatting.
 
 ## Planned features
 
-- Register singers with a name and optional nickname/email; distinguish singers with the same name using a unique singer ID.
+- Edit singer details and introduce authenticated admin access.
 - Create karaoke nights and assign songs to singers using YouTube links.
 - Reorder the queue and start, pause, complete, or skip performances.
 - Use a laptop admin window alongside an audience window displaying the embedded YouTube player on an external screen.
@@ -158,6 +168,7 @@ The host manages registration and the queue. Guests do not need accounts in the 
 | Frontend | Java with GWT |
 | Backend | Kotlin with Ktor and a JSON API |
 | Database | PostgreSQL |
+| Database access | Exposed SQL DSL and HikariCP |
 | Schema migrations | Liquibase |
 | Java baseline | JDK 21; initial GWT source language level 17 |
 | Frontend build | Maven |

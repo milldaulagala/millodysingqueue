@@ -8,11 +8,11 @@ This is a personal showcase project, developed incrementally through small, test
 
 ## Project status
 
-Task 1001 establishes the application foundation: a Java/GWT page calls the Kotlin/Ktor health endpoint and displays the connection status. Ktor serves the compiled frontend and JSON API together. Singer management, persistence, playback, containers, and AWS deployment are planned for later increments.
+The application foundation serves a Java/GWT page and Kotlin/Ktor health API together. Task 1002 adds local PostgreSQL, explicit Liquibase migrations, the initial `singers` table, and disposable database integration tests. Singer-management APIs/screens, playback, and AWS deployment remain later increments. Ktor does not yet use the database at runtime.
 
 ## Quick start
 
-Prerequisite: **JDK 21**, with `JAVA_HOME` pointing to it and Java available on `PATH`. The first build downloads the pinned build tools and dependencies. You do not need globally installed Maven, Gradle, PostgreSQL, Node.js, or a running Colima instance for this increment.
+Prerequisites: **JDK 21**, with `JAVA_HOME` pointing to it and Java available on `PATH`; Docker CLI and a running Docker-compatible engine (Colima locally) for database integration tests. The first build downloads pinned build tools, dependencies and test images. You do not need globally installed Maven, Gradle, PostgreSQL, Liquibase or Node.js.
 
 On macOS, select the installed JDK if needed:
 
@@ -24,15 +24,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 From the repository root, build and test both components:
 
 ```sh
-cd backend
-./gradlew clean build
+./scripts/check.sh
 ```
 
 Gradle invokes `frontend/mvnw clean verify` when frontend inputs change, compiles the GWT application, includes its public assets in the backend resources, runs the backend tests, and creates application distributions. The frontend clean prevents deleted assets lingering in later packages. Generated files remain under `frontend/target/` and `backend/build/` and are excluded from Git.
 
-Start the integrated application from `backend/`:
+Start the integrated application from the repository root:
 
 ```sh
+cd backend
 ./gradlew run
 ```
 
@@ -81,7 +81,23 @@ backend/                   Kotlin/Ktor source, tests, Gradle build and wrapper
 .editorconfig              Shared formatting defaults
 ```
 
-The separate project plan is intentionally not included in this repository. AWS infrastructure and local database configuration will be added in their own tasks.
+Local database setup and administration are documented in [Local PostgreSQL and Liquibase](docs/local-database.md). The separate project plan is intentionally not included in this repository. AWS infrastructure will be added in a later task.
+
+## Local database
+
+From the repository root:
+
+```sh
+colima start --cpu 2 --memory 2
+./scripts/setup-local-env.sh
+docker compose up -d --wait postgres
+./scripts/db.sh validate
+./scripts/db.sh update-sql
+./scripts/db.sh update
+./scripts/db.sh status
+```
+
+The setup script creates an ignored `.env` with independent random passwords and refuses to replace an existing file. PostgreSQL binds to loopback only and keeps its data in a named volume. The migration role owns the schemas; the application role receives data permissions only. See the [database guide](docs/local-database.md) for DataGrip, role setup, migration rules, tests, backup/restore, and destructive reset instructions.
 
 ## Build versions
 
@@ -93,8 +109,12 @@ The separate project plan is intentionally not included in this repository. AWS 
 | Gradle wrapper distribution | 9.7.0 |
 | Kotlin | 2.4.21 |
 | Ktor | 3.6.0 |
+| PostgreSQL image | 17.11 Bookworm, digest-pinned |
+| Liquibase | 5.0.4 |
+| PostgreSQL JDBC | 42.7.14 |
+| Testcontainers | 2.0.5 |
 
-Use the wrappers for builds. Their distribution checksums are pinned. Backend dependencies are locked in `backend/gradle.lockfile`; intentional dependency changes must update and review the lockfile using `./gradlew build --write-locks` from `backend/`. Frontend dependencies/plugins are declared in `frontend/pom.xml`.
+Use the wrappers for builds. Their distribution checksums are pinned. Backend dependencies are locked in `backend/gradle.lockfile`; intentional dependency changes must update and review the lockfile using `./scripts/check.sh build --write-locks` from the repository root. Frontend dependencies/plugins are declared in `frontend/pom.xml`. Keep the PostgreSQL image in Compose and the integration test aligned when upgrading it.
 
 ## Tests and CI
 
@@ -107,6 +127,8 @@ From `backend/`, run:
 The build compiles frontend assets if necessary. Ktor tests verify the health JSON/status/content type, cache behaviour, serving the frontend/bootstrap/CSS, and 404 responses for unknown API paths and excluded build metadata. Results are written to `backend/build/reports/tests/test/index.html`.
 
 For a browser smoke check, start the application and verify the success message. Stop the backend while leaving the page open, click **Check connection**, and verify the error message. Restart it and retry to confirm recovery. This check exercises compiled GWT code; backend tests alone do not execute browser JavaScript.
+
+The complete build also runs database integration tests against an automatically created PostgreSQL container, separate from the Compose development database. Use `./scripts/check.sh` from the repository root, or `./scripts/check.sh integrationTest` for only the database suite. Docker is required for these checks; no tests are silently skipped. See the [database testing instructions](docs/local-database.md#tests-and-ci).
 
 GitHub Actions runs the integrated clean build on pull requests and pushes to `main`, with read-only repository permissions and pinned action revisions. CI results can only be confirmed after the branch is pushed and the workflow runs. Branch protection must be configured separately in GitHub.
 
@@ -158,7 +180,7 @@ GWT frontend code is written in Java; Ktor backend code is written in Kotlin. Th
 
 Development uses IntelliJ IDEA, JDK 21, Maven, and Colima with Docker CLI/Compose. Node.js and npm will support the TypeScript CDK infrastructure. PostgreSQL will run in a container rather than being installed directly on macOS.
 
-Database and AWS setup instructions will be added with their implementation. Keep credentials and local `.env` files outside version control.
+See [Local PostgreSQL and Liquibase](docs/local-database.md) for database setup. AWS setup instructions will be added with its implementation. Keep credentials and local `.env` files outside version control.
 
 ## Playback considerations
 

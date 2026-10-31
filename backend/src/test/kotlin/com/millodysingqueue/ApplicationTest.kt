@@ -42,7 +42,11 @@ class ApplicationTest {
     @Test
     fun `unknown API paths and build metadata are not served as the application page`() = testApplication {
         environment { config = ApplicationConfig("application.conf") }
-        for (path in listOf("/api/missing", "/WEB-INF/classes/com/millodysingqueue/client/MillodySingQueueEntryPoint.class")) {
+        for (path in listOf(
+            "/api/missing",
+            "/WEB-INF/classes/com/millodysingqueue/client/MillodySingQueueEntryPoint.class",
+            "/db/changelog/db.changelog-master.xml",
+        )) {
             assertEquals(HttpStatusCode.NotFound, client.get(path).status, path)
         }
     }

@@ -1,5 +1,6 @@
 package com.millodysingqueue.database
 
+import com.millodysingqueue.workspace.WorkspaceContext
 import com.millodysingqueue.module
 import com.millodysingqueue.singer.DuplicateSingerEmailException
 import com.millodysingqueue.singer.DuplicateSingerNicknameException
@@ -85,18 +86,60 @@ class DatabaseIntegrationTest {
                 }
             }
         }
+        migrateLegacyDatabase()
+        val singerBefore = asMigrator { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("SELECT setval('app.singers_singer_id_seq', 5)")
+                statement.executeQuery("INSERT INTO app.singers (singer_name, nick_name, email) VALUES ('Mill', 'Bandara', 'mill@example.com') RETURNING singer_id, singer_name, nick_name, email, created_at").use { result ->
+                    assertTrue(result.next())
+                    (1..5).map { result.getString(it) }
+                }
+            }
+        }
+        val songBefore = asMigrator { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("INSERT INTO app.songs (title, artist, youtube_video_id) VALUES ('Country Roads', 'John Denver', '7aNW9hRKYA8') RETURNING song_id, title, artist, youtube_video_id, created_at").use { result ->
+                    assertTrue(result.next())
+                    (1..5).map { result.getString(it) }
+                }
+            }
+        }
+        val previousChanges = changeRecords()
+        assertEquals(3, previousChanges.size)
         migrate("update")
+        assertEquals(previousChanges, changeRecords().take(3), "Existing migration records must not change")
+        asApplication { connection ->
+            assertTrue(insertSinger(connection, "After upgrade") > singerBefore.first().toLong(),
+                "Upgrade must preserve the identity sequence as well as existing IDs")
+            for ((sql, before) in listOf(
+                "SELECT singer_id, singer_name, nick_name, email, created_at, workspace_id FROM app.singers WHERE email = 'mill@example.com'" to singerBefore,
+                "SELECT song_id, title, artist, youtube_video_id, created_at, workspace_id FROM app.songs" to songBefore,
+            )) {
+                connection.createStatement().use { statement ->
+                    statement.executeQuery(sql).use { result ->
+                        assertTrue(result.next())
+                        assertEquals(before, (1..5).map { result.getString(it) })
+                        assertEquals(1L, result.getLong(6))
+                    }
+                }
+            }
+        }
     }
 
     @BeforeEach
-    fun clearSingers() {
-        asMigrator { it.createStatement().use { statement -> statement.execute("TRUNCATE app.singers, app.songs RESTART IDENTITY") } }
+    fun clearData() {
+        asMigrator { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("TRUNCATE app.singers, app.songs RESTART IDENTITY")
+                statement.execute("DELETE FROM app.workspaces WHERE workspace_id <> 1")
+            }
+        }
     }
 
     @Test
     fun `migrations rerun safely without changing their execution records`() {
         val before = changeRecords()
-        assertEquals(3, before.size)
+        assertEquals(4, before.size)
         migrate("update")
         migrate("validate")
         migrate("status")
@@ -189,7 +232,7 @@ class DatabaseIntegrationTest {
     fun `Exposed uses the application role persists across pools and handles conflicts`() = runBlocking {
         val config = runtimeConfig()
         ApplicationDatabase(config).use { managed ->
-            val repository = ExposedSingerRepository(managed.database)
+            val repository = ExposedSingerRepository(managed.database, WorkspaceContext(1))
             val mill = repository.create(NewSinger("Mill", "Host", "Mill@example.com"))
             assertTrue(mill.singerId > 0)
             assertNotNull(mill.createdAt)
@@ -202,7 +245,7 @@ class DatabaseIntegrationTest {
             assertEquals(3, repository.list().size)
         }
         ApplicationDatabase(config).use { managed ->
-            val saved = ExposedSingerRepository(managed.database).list()
+            val saved = ExposedSingerRepository(managed.database, WorkspaceContext(1)).list()
             assertEquals(listOf("Mick", "Mick", "Mill"), saved.map { it.singerName })
             assertTrue(saved[0].singerId < saved[1].singerId)
         }
@@ -291,7 +334,7 @@ class DatabaseIntegrationTest {
                     async {
                         start.await()
                         try {
-                            ExposedSingerRepository(managed.database).create(NewSinger("Mill", "Bandara", null))
+                            ExposedSingerRepository(managed.database, WorkspaceContext(1)).create(NewSinger("Mill", "Bandara", null))
                             "created"
                         } catch (_: DuplicateSingerNicknameException) {
                             "conflict"
@@ -300,7 +343,7 @@ class DatabaseIntegrationTest {
                 }
                 start.complete(Unit)
                 assertEquals(listOf("conflict", "created"), attempts.awaitAll().sorted())
-                val repository = ExposedSingerRepository(first.database)
+                val repository = ExposedSingerRepository(first.database, WorkspaceContext(1))
                 assertEquals(1, repository.list().size)
                 repository.create(NewSinger("Mill", "Host", null))
                 assertEquals(2, repository.list().size)
@@ -328,7 +371,7 @@ class DatabaseIntegrationTest {
     @Test
     fun `songs persist across pools with stable ordering and distinct video versions`() = runBlocking {
         ApplicationDatabase(runtimeConfig()).use { managed ->
-            val repository = ExposedSongRepository(managed.database)
+            val repository = ExposedSongRepository(managed.database, WorkspaceContext(1))
             val first = repository.create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
             assertTrue(first.songId > 0)
             assertNotNull(first.createdAt)
@@ -339,7 +382,7 @@ class DatabaseIntegrationTest {
             repository.create(NewSong("ABBA karaoke", "ABBA", "AbC123_-xyz"))
         }
         ApplicationDatabase(runtimeConfig()).use { managed ->
-            val songs = ExposedSongRepository(managed.database).list()
+            val songs = ExposedSongRepository(managed.database, WorkspaceContext(1)).list()
             assertEquals(listOf("ABBA karaoke", "Country Roads", "Country Roads"), songs.map { it.title })
             assertTrue(songs[1].songId < songs[2].songId)
         }
@@ -349,7 +392,7 @@ class DatabaseIntegrationTest {
     fun `database rejects invalid song data and app cannot alter song schema`() {
         asApplication { connection ->
             fun insert(title: String?, artist: String?, video: String?) {
-                connection.prepareStatement("INSERT INTO app.songs (title, artist, youtube_video_id) VALUES (?, ?, ?)").use { statement ->
+                connection.prepareStatement("INSERT INTO app.songs (title, artist, youtube_video_id, workspace_id) VALUES (?, ?, ?, 1)").use { statement ->
                     statement.setString(1, title)
                     statement.setString(2, artist)
                     statement.setString(3, video)
@@ -380,7 +423,7 @@ class DatabaseIntegrationTest {
                     async {
                         start.await()
                         try {
-                            ExposedSongRepository(managed.database).create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
+                            ExposedSongRepository(managed.database, WorkspaceContext(1)).create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
                             "created"
                         } catch (_: DuplicateSongVideoException) {
                             "conflict"
@@ -389,7 +432,7 @@ class DatabaseIntegrationTest {
                 }
                 start.complete(Unit)
                 assertEquals(listOf("conflict", "created"), attempts.awaitAll().sorted())
-                assertEquals(1, ExposedSongRepository(first.database).list().size)
+                assertEquals(1, ExposedSongRepository(first.database, WorkspaceContext(1)).list().size)
             }
         }
     }
@@ -415,10 +458,202 @@ class DatabaseIntegrationTest {
         assertEquals(listOf(song), Json.decodeFromString<List<SongResponse>>(client.get("/api/songs").bodyAsText()))
     }
 
-    private fun runtimeConfig() = MapApplicationConfig(
+    @Test
+    fun `workspace repositories isolate lists and scope all duplicate rules`() = runBlocking {
+        val otherId = createWorkspace()
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val firstSingers = ExposedSingerRepository(managed.database, WorkspaceContext(1))
+            val otherSingers = ExposedSingerRepository(managed.database, WorkspaceContext(otherId))
+            val firstSongs = ExposedSongRepository(managed.database, WorkspaceContext(1))
+            val otherSongs = ExposedSongRepository(managed.database, WorkspaceContext(otherId))
+            val singer = NewSinger("Mill", "Bandara", "mill@example.com")
+            val song = NewSong("Country Roads", "John Denver", "7aNW9hRKYA8")
+            val firstSinger = firstSingers.create(singer)
+            val firstSong = firstSongs.create(song)
+            assertTrue(otherSingers.list().isEmpty())
+            assertTrue(otherSongs.list().isEmpty())
+            val otherSinger = otherSingers.create(singer)
+            val otherSong = otherSongs.create(song)
+            assertEquals(listOf(firstSinger), firstSingers.list())
+            assertEquals(listOf(otherSinger), otherSingers.list())
+            assertEquals(listOf(firstSong), firstSongs.list())
+            assertEquals(listOf(otherSong), otherSongs.list())
+            for (repository in listOf(firstSingers, otherSingers)) {
+                assertFailsWith<DuplicateSingerNicknameException> { repository.create(singer.copy(email = null)) }
+                assertFailsWith<DuplicateSingerEmailException> { repository.create(singer.copy(nickName = "Host", email = "MILL@example.com")) }
+                repository.create(NewSinger("Mick", null, null))
+                repository.create(NewSinger("Mick", null, null))
+            }
+            for (repository in listOf(firstSongs, otherSongs)) {
+                assertFailsWith<DuplicateSongVideoException> { repository.create(song) }
+            }
+        }
+    }
+
+    @Test
+    fun `database requires valid ownership and restricts deletion of populated workspaces`() {
+        asApplication { connection ->
+            for (table in listOf("singers", "songs")) {
+                val fields = if (table == "singers") "singer_name" else "title, artist, youtube_video_id"
+                val values = if (table == "singers") "'Mill'" else "'Song', 'Artist', '7aNW9hRKYA8'"
+                assertEquals("23502", assertFailsWith<SQLException> {
+                    connection.createStatement().use { it.execute("INSERT INTO app.$table ($fields) VALUES ($values)") }
+                }.sqlState)
+                assertEquals("23503", assertFailsWith<SQLException> {
+                    connection.createStatement().use { it.execute("INSERT INTO app.$table ($fields, workspace_id) VALUES ($values, 9223372036854775807)") }
+                }.sqlState)
+            }
+            for (sql in listOf("INSERT INTO app.workspaces (workspace_name) VALUES ('Forbidden')",
+                "UPDATE app.workspaces SET workspace_name = 'Forbidden'", "DELETE FROM app.workspaces",
+                "SELECT nextval('app.workspaces_workspace_id_seq')")) {
+                assertEquals("42501", assertFailsWith<SQLException> { connection.createStatement().use { it.execute(sql) } }.sqlState)
+            }
+        }
+        for (table in listOf("singers", "songs")) {
+            val id = createWorkspace()
+            asMigrator { connection ->
+                connection.createStatement().use { statement ->
+                    if (table == "singers") statement.execute("INSERT INTO app.singers (workspace_id, singer_name) VALUES ($id, 'Mill')")
+                    else statement.execute("INSERT INTO app.songs (workspace_id, title, artist, youtube_video_id) VALUES ($id, 'Song', 'Artist', '7aNW9hRKYA8')")
+                    assertEquals("23503", assertFailsWith<SQLException> {
+                        statement.execute("DELETE FROM app.workspaces WHERE workspace_id = $id")
+                    }.sqlState)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `configured workspace must exist and pooled connections remain usable after failure`() {
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            WorkspaceContext(1).requireExists(managed.database)
+            assertFailsWith<IllegalArgumentException> {
+                WorkspaceContext(Long.MAX_VALUE).requireExists(managed.database)
+            }
+            WorkspaceContext(1).requireExists(managed.database)
+        }
+    }
+
+    @Test
+    fun `API uses server workspace and ignores client scope headers and query parameters`() = testApplication {
+        val other = createWorkspace()
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            ExposedSingerRepository(managed.database, WorkspaceContext(other)).create(NewSinger("Private singer", null, "private@example.com"))
+            ExposedSongRepository(managed.database, WorkspaceContext(other)).create(NewSong("Private song", "Artist", "7aNW9hRKYA8"))
+        }
+        environment { config = runtimeConfig() }
+        application { module() }
+        for (path in listOf("singers", "songs")) {
+            val response = client.get("/api/$path?workspaceId=$other") { headers.append("X-Workspace-Id", other.toString()) }
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("[]", response.bodyAsText())
+        }
+        val created = client.post("/api/songs") {
+            headers.append("X-Workspace-Id", other.toString())
+            contentType(ContentType.Application.Json)
+            setBody(Json.encodeToString(SaveSongRequest("Public song", "Artist", "7aNW9hRKYA8")))
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            assertEquals(listOf("Public song"), ExposedSongRepository(managed.database, WorkspaceContext(1)).list().map { it.title })
+            assertEquals(listOf("Private song"), ExposedSongRepository(managed.database, WorkspaceContext(other)).list().map { it.title })
+        }
+    }
+
+    @Test
+    fun `fresh database migrates fully with workspace privileges and ownership constraints`() {
+        val name = "workspace_fresh_test"
+        val url = postgres.jdbcUrl.substringBefore('?').substringBeforeLast('/') + "/" + name
+        fun <T> asAdmin(block: (Connection) -> T): T =
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use(block)
+        asAdmin { connection ->
+            connection.createStatement().use { it.execute("CREATE DATABASE $name OWNER millody_migrator") }
+        }
+        try {
+            DriverManager.getConnection(url, "millody_migrator", migrationPassword).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute("REVOKE ALL ON DATABASE $name FROM PUBLIC")
+                    statement.execute("GRANT CONNECT ON DATABASE $name TO millody_app")
+                    statement.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
+                    statement.execute("CREATE SCHEMA app AUTHORIZATION millody_migrator")
+                    statement.execute("CREATE SCHEMA liquibase AUTHORIZATION millody_migrator")
+                    statement.execute("GRANT USAGE ON SCHEMA app TO millody_app")
+                    statement.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO millody_app")
+                    statement.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT USAGE, SELECT ON SEQUENCES TO millody_app")
+                }
+            }
+            DatabaseMigrations.execute("update", url, "millody_migrator", migrationPassword, ByteArrayOutputStream())
+            DatabaseMigrations.execute("validate", url, "millody_migrator", migrationPassword, ByteArrayOutputStream())
+            DriverManager.getConnection(url, "millody_app", applicationPassword).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT workspace_id, workspace_name FROM app.workspaces").use { result ->
+                        assertTrue(result.next())
+                        assertEquals(1L, result.getLong(1))
+                        assertEquals("MillodySingQueue", result.getString(2))
+                    }
+                    insertSinger(connection, "Mill")
+                    statement.execute("INSERT INTO app.songs (workspace_id, title, artist, youtube_video_id) VALUES (1, 'Country Roads', 'John Denver', '7aNW9hRKYA8')")
+                    assertEquals("42501", assertFailsWith<SQLException> {
+                        statement.execute("INSERT INTO app.workspaces (workspace_name) VALUES ('Forbidden')")
+                    }.sqlState)
+                }
+            }
+        } finally {
+            asAdmin { connection ->
+                connection.createStatement().use { it.execute("DROP DATABASE $name WITH (FORCE)") }
+            }
+        }
+    }
+
+    @Test
+    fun `nonexistent configured workspace prevents runtime startup and closes its pool`() {
+        testApplication {
+            environment { config = runtimeConfig(Long.MAX_VALUE) }
+            application { module() }
+            assertFailsWith<IllegalArgumentException> { startApplication() }
+        }
+        asMigrator { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT count(*) FROM pg_stat_activity WHERE usename = 'millody_app' AND application_name = 'MillodySingQueue'").use { result ->
+                    assertTrue(result.next())
+                    assertEquals(0, result.getInt(1))
+                }
+            }
+        }
+    }
+
+    private fun createWorkspace(): Long = asMigrator { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery("INSERT INTO app.workspaces (workspace_name) VALUES ('Other organiser') RETURNING workspace_id").use { result ->
+                assertTrue(result.next())
+                result.getLong(1)
+            }
+        }
+    }
+
+    private fun migrateLegacyDatabase() {
+        DriverManager.getConnection(postgres.jdbcUrl, "millody_migrator", migrationPassword).use { connection ->
+            val database = liquibase.database.DatabaseFactory.getInstance()
+                .findCorrectDatabaseImplementation(liquibase.database.jvm.JdbcConnection(connection))
+            database.defaultSchemaName = "app"
+            database.liquibaseSchemaName = "liquibase"
+            liquibase.resource.ClassLoaderResourceAccessor().use { resources ->
+                liquibase.Scope.child(mapOf(liquibase.Scope.Attr.resourceAccessor.name to resources)) {
+                    liquibase.command.CommandScope("update")
+                        .addArgumentValue("database", database)
+                        .addArgumentValue("changelogFile", "db/legacy-changelog.xml")
+                        .setOutput(ByteArrayOutputStream())
+                        .execute()
+                }
+            }
+        }
+    }
+
+    private fun runtimeConfig(workspaceId: Long = 1) = MapApplicationConfig(
         "database.url" to postgres.jdbcUrl,
         "database.user" to "millody_app",
         "database.password" to applicationPassword,
+        "workspace.id" to workspaceId.toString(),
     )
 
     private fun migrate(command: String, output: ByteArrayOutputStream = ByteArrayOutputStream()) =
@@ -438,7 +673,7 @@ class DatabaseIntegrationTest {
 
     private fun insertSinger(connection: Connection, name: String?, email: String? = null, nickname: String? = null): Long =
         connection.prepareStatement(
-            "INSERT INTO app.singers (singer_name, email, nick_name) VALUES (?, ?, ?) RETURNING singer_id",
+            "INSERT INTO app.singers (singer_name, email, nick_name, workspace_id) VALUES (?, ?, ?, 1) RETURNING singer_id",
         ).use { statement ->
             statement.setString(1, name)
             statement.setString(2, email)

@@ -14,6 +14,7 @@ import com.millodysingqueue.song.SongService
 import com.millodysingqueue.song.SongStorageException
 import com.millodysingqueue.song.SongValidationException
 import com.millodysingqueue.song.songRoutes
+import com.millodysingqueue.workspace.WorkspaceContext
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -33,11 +34,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 
 fun Application.module() {
+    val workspace = WorkspaceContext.fromConfig(environment.config)
     val database = ApplicationDatabase(environment.config)
     monitor.subscribe(ApplicationStopped) { database.close() }
     try {
-        configureApplication(SingerService(ExposedSingerRepository(database.database)),
-            SongService(ExposedSongRepository(database.database)))
+        workspace.requireExists(database.database)
+        configureApplication(SingerService(ExposedSingerRepository(database.database, workspace)),
+            SongService(ExposedSongRepository(database.database, workspace)))
     } catch (exception: Exception) {
         database.close()
         throw exception

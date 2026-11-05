@@ -30,6 +30,8 @@ MIGRATION_DB_URL=jdbc:postgresql://127.0.0.1:\${POSTGRES_PORT}/millodysingqueue
 MIGRATION_DB_USER=millody_migrator
 APPLICATION_DB_URL=jdbc:postgresql://127.0.0.1:\${POSTGRES_PORT}/millodysingqueue
 APPLICATION_DB_USER=millody_app
+# Initial workspace created by migration 004 on a fresh database.
+APPLICATION_WORKSPACE_ID=1
 EOF
 )
 printf '%s\n' 'Created ignored .env with random passwords and owner-only permissions.'

@@ -32,7 +32,7 @@ The database is `millodysingqueue`. It is published at `127.0.0.1:5432` by defau
 | --- | --- | --- |
 | `postgres` | Local administrative bootstrap and backup/restore | `POSTGRES_PASSWORD` |
 | `millody_migrator` | Owns `app` and `liquibase` schemas; applies migrations | `MIGRATION_DB_PASSWORD` |
-| `millody_app` | CRUD access to application tables and identity sequence usage | `APPLICATION_DB_PASSWORD` |
+| `millody_app` | CRUD access to singers/songs and their identity sequences; read-only access to workspaces | `APPLICATION_DB_PASSWORD` |
 
 The application role cannot create schemas/databases, create or alter application tables, or access Liquibase tracking tables. Neither application nor migration role is a superuser. The migration role's default privileges grant application DML permissions to new tables in `app`; Liquibase metadata is isolated in `liquibase`.
 
@@ -71,15 +71,15 @@ The initial changelog creates `app.singers`:
 | `email` | Optional; no whitespace or empty value; unique ignoring case |
 | `created_at` | Required timestamp with time zone, default current timestamp |
 
-The singer-management migration also enforces a case-insensitive unique singer-name/nickname pair when a nickname is provided. Mill / Bandara cannot be repeated, while Mill / Host is allowed. Missing nicknames remain optional and do not participate in this uniqueness rule.
+The singer-management migration also enforces a case-insensitive unique singer-name/nickname pair when a nickname is provided. Migration 004 scopes this rule and email uniqueness to each workspace. Mill / Bandara cannot be repeated, while Mill / Host is allowed. Missing nicknames remain optional and do not participate in this uniqueness rule.
 
-Email casing is preserved, with a unique index on `lower(email)`. Multiple NULL emails are allowed. The singer API trims user input before saving and applies practical email-format validation. Current constraints reject whitespace anywhere in a supplied email.
+Email casing is preserved, with a unique index on `(workspace_id, lower(email))` after migration 004. Multiple NULL emails are allowed. The singer API trims user input before saving and applies practical email-format validation. Current constraints reject whitespace anywhere in a supplied email.
 
 Add new migrations under `backend/src/main/resources/db/changelog/changes/` and include them in the root XML changelog. Do not edit an applied changeset or clear checksums to hide an unexpected edit. Correct mistakes with a new changeset. The first table creation has no automatic rollback because dropping it would destroy singer data; use forward fixes and tested backups for recovery.
 
 ## Song library
 
-Task 1004 adds `app.songs` through `003-create-songs.sql`: generated `song_id`, required title/artist (maximum 200 characters), a case-sensitive unique 11-character `youtube_video_id`, and a creation timestamp. Existing default privileges grant the application access. Run `./scripts/db.sh update` before using Songs; no singer rows or previous changesets are changed. See [Song management](song-management.md) for supported links and API rules.
+Task 1004 adds `app.songs` through `003-create-songs.sql`: generated `song_id`, required title/artist (maximum 200 characters), a case-sensitive unique 11-character `youtube_video_id` (workspace-specific after migration 004), and a creation timestamp. Existing default privileges grant the application access. Run `./scripts/db.sh update` before using Songs; no singer rows or previous changesets are changed. See [Song management](song-management.md) for supported links and API rules.
 
 ## DataGrip
 
@@ -161,3 +161,7 @@ docker compose up -d --wait postgres
 ```
 
 An empty volume reruns bootstrap using the current `.env`. Do not use `colima delete`, broad Docker prune commands, or volume deletion as ordinary shutdown steps.
+
+## Workspace ownership
+
+Migration 004 adds `app.workspaces` and required ownership on singers/songs, preserving existing records. Duplicate rules are now workspace-specific. Add `APPLICATION_WORKSPACE_ID` to existing `.env` files after applying the migration. See [Workspace ownership and upgrade](workspace-management.md) for commands, privileges and isolation tests.

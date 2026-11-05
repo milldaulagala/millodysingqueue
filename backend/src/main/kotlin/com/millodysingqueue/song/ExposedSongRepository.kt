@@ -1,11 +1,13 @@
 package com.millodysingqueue.song
 
+import com.millodysingqueue.workspace.WorkspaceContext
 import java.sql.SQLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.lowerCase
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -16,6 +18,7 @@ import org.postgresql.util.PSQLException
 import org.slf4j.LoggerFactory
 
 private object Songs : Table("app.songs") {
+    val workspaceId = long("workspace_id")
     val id = long("song_id").autoIncrement()
     val title = varchar("title", 200)
     val artist = varchar("artist", 200)
@@ -24,9 +27,10 @@ private object Songs : Table("app.songs") {
     override val primaryKey = PrimaryKey(id)
 }
 
-class ExposedSongRepository(private val database: Database) : SongRepository {
+class ExposedSongRepository(private val database: Database, private val workspace: WorkspaceContext) : SongRepository {
     override suspend fun create(song: NewSong): Song = query {
         Songs.insertReturning {
+            it[workspaceId] = workspace.workspaceId
             it[title] = song.title
             it[artist] = song.artist
             it[videoId] = song.youtubeVideoId
@@ -34,7 +38,7 @@ class ExposedSongRepository(private val database: Database) : SongRepository {
     }
 
     override suspend fun list(): List<Song> = query {
-        Songs.selectAll().orderBy(Songs.title.lowerCase() to SortOrder.ASC,
+        Songs.selectAll().where { Songs.workspaceId eq workspace.workspaceId }.orderBy(Songs.title.lowerCase() to SortOrder.ASC,
             Songs.artist.lowerCase() to SortOrder.ASC, Songs.id to SortOrder.ASC).map { it.toSong() }
     }
 

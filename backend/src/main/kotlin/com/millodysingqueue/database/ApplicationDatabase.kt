@@ -17,7 +17,7 @@ class ApplicationDatabase(config: ApplicationConfig) : AutoCloseable {
         connectionTimeout = 5_000
         validationTimeout = 2_000
         initializationFailTimeout = 5_000
-        poolName = "singer-database"
+        poolName = "application-database"
         addDataSourceProperty("connectTimeout", "5")
         addDataSourceProperty("socketTimeout", "10")
         addDataSourceProperty("tcpKeepAlive", "true")

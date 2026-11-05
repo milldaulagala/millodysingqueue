@@ -8,7 +8,7 @@ This is a personal showcase project, developed incrementally through small, test
 
 ## Project status
 
-Task 1003 adds singer registration and a searchable directory to our Java/GWT frontend and Kotlin/Ktor JSON API. Singers are stored in PostgreSQL through Exposed SQL DSL and HikariCP, using the restricted application role. Liquibase remains responsible for explicit schema migrations. Songs, karaoke nights, editing/deleting, authentication and AWS deployment are later increments. This version is for localhost use only.
+Task 1004 adds song saving and a searchable song library alongside singer registration. The Java/GWT frontend has Singers/Songs navigation and a cream-orange, white and navy theme. The Kotlin/Ktor JSON API stores singers and songs in PostgreSQL through Exposed SQL DSL and HikariCP, using the restricted application role. Liquibase manages explicit schema migrations. Song assignments, karaoke nights, playback, editing/deleting, authentication and AWS deployment are later increments. This version is for localhost use only.
 
 ## Quick start
 
@@ -36,7 +36,7 @@ Start the integrated application from the repository root:
 ./scripts/run.sh
 ```
 
-Open [http://localhost:8080](http://localhost:8080). The page shows singer registration and the directory, with our cream-orange, white and teal theme. Register a singer, refresh the page and search by name, nickname or email. See [Singer management](docs/singer-management.md) for the API, validation rules and browser checks. Stop the server with **Control + C**.
+Open [http://localhost:8080](http://localhost:8080). The page shows singer registration and the directory. Select **Songs** to save a song and search the library, or open [Songs directly](http://localhost:8080/#songs). See [Singer management](docs/singer-management.md) and [Song management](docs/song-management.md) for API contracts, validation rules and browser checks. Stop the server with **Control + C**.
 
 Check the JSON endpoint separately:
 
@@ -136,7 +136,7 @@ From `backend/`, run:
 
 The build compiles frontend assets if necessary. Ktor tests verify the health JSON/status/content type, cache behaviour, serving the frontend/bootstrap/CSS, and 404 responses for unknown API paths and excluded build metadata. Results are written to `backend/build/reports/tests/test/index.html`.
 
-Singer service/API tests cover normalisation, validation, JSON errors, duplicate-email conflicts and storage failures. For compiled GWT browser checks, follow [Singer management verification](docs/singer-management.md#verification); backend tests alone do not execute browser JavaScript.
+Singer and song service/API tests cover normalisation, validation, JSON errors, duplicate conflicts, YouTube ID extraction and storage failures. For compiled GWT browser checks, follow [Singer management verification](docs/singer-management.md#verification) and [Song management verification](docs/song-management.md#architecture-and-verification); backend tests alone do not execute browser JavaScript.
 
 The complete build also runs database integration tests against an automatically created PostgreSQL container, separate from the Compose development database. Use `./scripts/check.sh` from the repository root, or `./scripts/check.sh integrationTest` for only the database suite. Docker is required for these checks; no tests are silently skipped. See the [database testing instructions](docs/local-database.md#tests-and-ci).
 

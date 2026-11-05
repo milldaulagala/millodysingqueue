@@ -6,6 +6,11 @@ import com.millodysingqueue.singer.DuplicateSingerNicknameException
 import com.millodysingqueue.singer.ExposedSingerRepository
 import com.millodysingqueue.singer.NewSinger
 import com.millodysingqueue.singer.SingerResponse
+import com.millodysingqueue.song.DuplicateSongVideoException
+import com.millodysingqueue.song.ExposedSongRepository
+import com.millodysingqueue.song.NewSong
+import com.millodysingqueue.song.SaveSongRequest
+import com.millodysingqueue.song.SongResponse
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -27,10 +32,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -85,13 +90,13 @@ class DatabaseIntegrationTest {
 
     @BeforeEach
     fun clearSingers() {
-        asMigrator { it.createStatement().use { statement -> statement.execute("TRUNCATE app.singers RESTART IDENTITY") } }
+        asMigrator { it.createStatement().use { statement -> statement.execute("TRUNCATE app.singers, app.songs RESTART IDENTITY") } }
     }
 
     @Test
     fun `migrations rerun safely without changing their execution records`() {
         val before = changeRecords()
-        assertEquals(2, before.size)
+        assertEquals(3, before.size)
         migrate("update")
         migrate("validate")
         migrate("status")
@@ -318,6 +323,96 @@ class DatabaseIntegrationTest {
         assertEquals("NICKNAME_ALREADY_EXISTS", error.code)
         assertEquals(mapOf("nickName" to "nickname already exists. please choose a different nickname"), error.fieldErrors)
         assertEquals(HttpStatusCode.Created, register("Host").status)
+    }
+
+    @Test
+    fun `songs persist across pools with stable ordering and distinct video versions`() = runBlocking {
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val repository = ExposedSongRepository(managed.database)
+            val first = repository.create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
+            assertTrue(first.songId > 0)
+            assertNotNull(first.createdAt)
+            assertFailsWith<DuplicateSongVideoException> {
+                repository.create(NewSong("Other title", "Other artist", "7aNW9hRKYA8"))
+            }
+            repository.create(NewSong("Country Roads", "John Denver", "_Ab-cD12e34"))
+            repository.create(NewSong("ABBA karaoke", "ABBA", "AbC123_-xyz"))
+        }
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val songs = ExposedSongRepository(managed.database).list()
+            assertEquals(listOf("ABBA karaoke", "Country Roads", "Country Roads"), songs.map { it.title })
+            assertTrue(songs[1].songId < songs[2].songId)
+        }
+    }
+
+    @Test
+    fun `database rejects invalid song data and app cannot alter song schema`() {
+        asApplication { connection ->
+            fun insert(title: String?, artist: String?, video: String?) {
+                connection.prepareStatement("INSERT INTO app.songs (title, artist, youtube_video_id) VALUES (?, ?, ?)").use { statement ->
+                    statement.setString(1, title)
+                    statement.setString(2, artist)
+                    statement.setString(3, video)
+                    statement.executeUpdate()
+                }
+            }
+            for ((title, artist, video) in listOf(Triple(null, "John", "7aNW9hRKYA8"), Triple(" ", "John", "7aNW9hRKYA8"),
+                Triple("Song", null, "7aNW9hRKYA8"), Triple("Song", " ", "7aNW9hRKYA8"),
+                Triple("Song", "John", null), Triple("Song", "John", "invalid"))) {
+                assertTrue(assertFailsWith<SQLException> { insert(title, artist, video) }.sqlState in setOf("23502", "23514"))
+            }
+            insert("Song", "John", "7aNW9hRKYA8")
+            assertEquals("23505", assertFailsWith<SQLException> { insert("Other", "Other", "7aNW9hRKYA8") }.sqlState)
+            // YouTube IDs are case-sensitive, so differently cased IDs remain distinct.
+            insert("Other version", "John", "7ANW9hRKYA8")
+            assertEquals("42501", assertFailsWith<SQLException> {
+                connection.createStatement().use { it.execute("ALTER TABLE app.songs ADD COLUMN forbidden text") }
+            }.sqlState)
+        }
+    }
+
+    @Test
+    fun `concurrent saves of one video create exactly one song`() = runBlocking<Unit> {
+        ApplicationDatabase(runtimeConfig()).use { first ->
+            ApplicationDatabase(runtimeConfig()).use { second ->
+                val start = CompletableDeferred<Unit>()
+                val attempts = listOf(first, second).map { managed ->
+                    async {
+                        start.await()
+                        try {
+                            ExposedSongRepository(managed.database).create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
+                            "created"
+                        } catch (_: DuplicateSongVideoException) {
+                            "conflict"
+                        }
+                    }
+                }
+                start.complete(Unit)
+                assertEquals(listOf("conflict", "created"), attempts.awaitAll().sorted())
+                assertEquals(1, ExposedSongRepository(first.database).list().size)
+            }
+        }
+    }
+
+    @Test
+    fun `song HTTP API saves extracted IDs and returns database duplicate conflicts`() = testApplication {
+        environment { config = runtimeConfig() }
+        application { module() }
+        suspend fun save(video: String) = client.post("/api/songs") {
+            contentType(ContentType.Application.Json)
+            setBody(Json.encodeToString(SaveSongRequest("  Country Roads  ", " John Denver ", video)))
+        }
+        val created = save("https://www.youtube.com/watch?v=7aNW9hRKYA8&list=RD7aNW9hRKYA8&t=3")
+        assertEquals(HttpStatusCode.Created, created.status)
+        val song = Json.decodeFromString<SongResponse>(created.bodyAsText())
+        assertEquals("Country Roads", song.title)
+        assertEquals("7aNW9hRKYA8", song.youtubeVideoId)
+        val duplicate = save("https://youtu.be/7aNW9hRKYA8")
+        assertEquals(HttpStatusCode.Conflict, duplicate.status)
+        val error = Json.decodeFromString<com.millodysingqueue.ApiError>(duplicate.bodyAsText())
+        assertEquals("VIDEO_ALREADY_EXISTS", error.code)
+        assertTrue(error.fieldErrors.containsKey("youtubeVideo"))
+        assertEquals(listOf(song), Json.decodeFromString<List<SongResponse>>(client.get("/api/songs").bodyAsText()))
     }
 
     private fun runtimeConfig() = MapApplicationConfig(

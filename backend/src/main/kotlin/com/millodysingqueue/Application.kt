@@ -8,6 +8,12 @@ import com.millodysingqueue.singer.SingerService
 import com.millodysingqueue.singer.SingerStorageException
 import com.millodysingqueue.singer.SingerValidationException
 import com.millodysingqueue.singer.singerRoutes
+import com.millodysingqueue.song.DuplicateSongVideoException
+import com.millodysingqueue.song.ExposedSongRepository
+import com.millodysingqueue.song.SongService
+import com.millodysingqueue.song.SongStorageException
+import com.millodysingqueue.song.SongValidationException
+import com.millodysingqueue.song.songRoutes
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -30,7 +36,8 @@ fun Application.module() {
     val database = ApplicationDatabase(environment.config)
     monitor.subscribe(ApplicationStopped) { database.close() }
     try {
-        configureApplication(SingerService(ExposedSingerRepository(database.database)))
+        configureApplication(SingerService(ExposedSingerRepository(database.database)),
+            SongService(ExposedSongRepository(database.database)))
     } catch (exception: Exception) {
         database.close()
         throw exception
@@ -38,9 +45,20 @@ fun Application.module() {
 }
 
 /** Explicit dependencies keep API tests independent of production connections. */
-fun Application.configureApplication(singers: SingerService) {
+fun Application.configureApplication(singers: SingerService, songs: SongService) {
     install(ContentNegotiation) { json() }
     install(StatusPages) {
+        exception<SongValidationException> { call, cause ->
+            call.respond(HttpStatusCode.BadRequest, ApiError("VALIDATION_ERROR", cause.message!!, cause.fieldErrors))
+        }
+        exception<DuplicateSongVideoException> { call, cause ->
+            call.respond(HttpStatusCode.Conflict, ApiError("VIDEO_ALREADY_EXISTS", cause.message!!,
+                mapOf("youtubeVideo" to cause.message!!)))
+        }
+        exception<SongStorageException> { call, _ ->
+            call.respond(HttpStatusCode.ServiceUnavailable,
+                ApiError("STORAGE_UNAVAILABLE", "Unable to access songs right now. Please try again."))
+        }
         exception<SingerValidationException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ApiError("VALIDATION_ERROR", cause.message!!, cause.fieldErrors))
         }
@@ -53,7 +71,7 @@ fun Application.configureApplication(singers: SingerService) {
                 mapOf("email" to cause.message!!)))
         }
         exception<BadRequestException> { call, _ ->
-            call.respond(HttpStatusCode.BadRequest, ApiError("INVALID_REQUEST", "Send a valid JSON singer registration."))
+            call.respond(HttpStatusCode.BadRequest, ApiError("INVALID_REQUEST", "Send a valid JSON request."))
         }
         exception<UnsupportedMediaTypeException> { call, _ ->
             call.respond(HttpStatusCode.UnsupportedMediaType, ApiError("UNSUPPORTED_MEDIA_TYPE", "Use application/json."))
@@ -75,6 +93,7 @@ fun Application.configureApplication(singers: SingerService) {
             call.respond(HealthResponse(status = "UP"))
         }
         singerRoutes(singers)
+        songRoutes(songs)
         staticResources("/", "static")
     }
 }

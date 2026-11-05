@@ -77,6 +77,10 @@ Email casing is preserved, with a unique index on `lower(email)`. Multiple NULL 
 
 Add new migrations under `backend/src/main/resources/db/changelog/changes/` and include them in the root XML changelog. Do not edit an applied changeset or clear checksums to hide an unexpected edit. Correct mistakes with a new changeset. The first table creation has no automatic rollback because dropping it would destroy singer data; use forward fixes and tested backups for recovery.
 
+## Song library
+
+Task 1004 adds `app.songs` through `003-create-songs.sql`: generated `song_id`, required title/artist (maximum 200 characters), a case-sensitive unique 11-character `youtube_video_id`, and a creation timestamp. Existing default privileges grant the application access. Run `./scripts/db.sh update` before using Songs; no singer rows or previous changesets are changed. See [Song management](song-management.md) for supported links and API rules.
+
 ## DataGrip
 
 Create a PostgreSQL data source:

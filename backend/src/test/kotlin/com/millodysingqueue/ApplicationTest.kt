@@ -1,6 +1,7 @@
 package com.millodysingqueue
 
 import com.millodysingqueue.singer.SingerService
+import com.millodysingqueue.song.SongService
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -20,7 +21,7 @@ class ApplicationTest {
     @Test
     fun `health endpoint returns an uncached JSON status`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         val response = client.get("/api/health")
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -32,7 +33,7 @@ class ApplicationTest {
     @Test
     fun `frontend and compiled bootstrap are served by the application`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         val page = client.get("/")
 
         assertEquals(HttpStatusCode.OK, page.status)
@@ -45,7 +46,7 @@ class ApplicationTest {
     @Test
     fun `unknown API paths and build metadata are not served as the application page`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         for (path in listOf(
             "/api/missing",
             "/WEB-INF/classes/com/millodysingqueue/client/MillodySingQueueEntryPoint.class",

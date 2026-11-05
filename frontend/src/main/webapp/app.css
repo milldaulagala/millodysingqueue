@@ -1,7 +1,7 @@
 :root {
     color-scheme: light;
     --page: #fff7ed;
-    --ink: #182133;
+    --ink: #183153;
     --muted: #5d6879;
     --teal: #007f79;
     --line: #eadfd2;
@@ -124,4 +124,22 @@ body {
 }
 @media (prefers-reduced-motion: no-preference) {
     .button { transition: background-color 120ms ease; }
+}
+
+/* Shared navigation and song library. Primary text stays navy, never pure black. */
+.main-navigation { display: flex; align-items: center; gap: 26px; }
+.navigation-link { color: var(--muted); text-decoration: none; font-size: 15px; font-weight: 650; padding: 12px 0; border-bottom: 3px solid transparent; }
+.navigation-link:hover { color: var(--teal); }
+.navigation-link.active { color: var(--teal); border-bottom-color: var(--teal); }
+.song-icon { display: grid; place-items: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 12px; background: #fff0df; color: #ad6b16; font-size: 30px; }
+.song-row:nth-child(even) .song-icon { background: #e1f5ef; color: var(--teal); }
+.song-artist { color: var(--muted); margin-top: 2px; font-size: 14px; }
+.video-link { display: inline-block; color: var(--teal); font-size: 12px; margin-top: 5px; text-decoration: none; }
+.video-link:hover { text-decoration: underline; }
+.heading, .brand-name, .singer-name, .field label { color: var(--ink); }
+@media (max-width: 650px) {
+    .site-header { flex-wrap: wrap; gap: 12px; }
+    .main-navigation { gap: 24px; }
+    .navigation-link { padding: 7px 0; }
+    .song-icon { width: 42px; height: 42px; font-size: 26px; }
 }

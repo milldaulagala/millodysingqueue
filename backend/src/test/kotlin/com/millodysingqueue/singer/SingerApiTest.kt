@@ -2,7 +2,9 @@ package com.millodysingqueue.singer
 
 import com.millodysingqueue.ApiError
 import com.millodysingqueue.FakeSingerRepository
+import com.millodysingqueue.FakeSongRepository
 import com.millodysingqueue.configureApplication
+import com.millodysingqueue.song.SongService
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -22,7 +24,7 @@ class SingerApiTest {
     @Test
     fun `registration returns created JSON and directory is uncached and ordered`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         assertEquals("[]", client.get("/api/singers").bodyAsText())
         val created = client.post("/api/singers") {
             contentType(ContentType.Application.Json)
@@ -46,7 +48,7 @@ class SingerApiTest {
     @Test
     fun `invalid fields and malformed JSON return safe structured errors`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         for (payload in listOf("{}", """{"singerName":" "}""", """{"singerName":"Mill","email":"bad"}""", "{", "null", "[]", """{"singerName":12}""", """{"singerName":"Mill","email":true}""", """{"singerName":"Mill","extra":"unknown"}""")) {
             val response = client.post("/api/singers") {
                 contentType(ContentType.Application.Json)
@@ -64,7 +66,7 @@ class SingerApiTest {
     @Test
     fun `duplicate email returns conflict and field error`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         suspend fun register(email: String) = client.post("/api/singers") {
             contentType(ContentType.Application.Json)
             setBody("""{"singerName":"Mill","email":"$email"}""")
@@ -80,7 +82,7 @@ class SingerApiTest {
     @Test
     fun `duplicate singer nickname returns the requested field error and different pairs are allowed`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
         suspend fun register(name: String, nickname: String?) = client.post("/api/singers") {
             contentType(ContentType.Application.Json)
             setBody(Json.encodeToString(CreateSingerRequest(name, nickname)))
@@ -104,7 +106,7 @@ class SingerApiTest {
     @Test
     fun `storage failures return retryable responses without SQL or secrets`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository().apply { unavailable = true })) }
+        application { configureApplication(SingerService(FakeSingerRepository().apply { unavailable = true }), SongService(FakeSongRepository())) }
         val response = client.get("/api/singers")
         assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
         assertEquals("STORAGE_UNAVAILABLE", Json.decodeFromString<ApiError>(response.bodyAsText()).code)

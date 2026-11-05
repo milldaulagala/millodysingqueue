@@ -11,5 +11,6 @@ set -a
 # Defaults also support .env files created before task 1003.
 APPLICATION_DB_URL=${APPLICATION_DB_URL:-jdbc:postgresql://127.0.0.1:${POSTGRES_PORT:-5432}/millodysingqueue}
 APPLICATION_DB_USER=${APPLICATION_DB_USER:-millody_app}
+: "${APPLICATION_WORKSPACE_ID:?Set APPLICATION_WORKSPACE_ID in .env; see docs/workspace-management.md.}"
 set +a
 exec "$ROOT/backend/gradlew" -p "$ROOT/backend" --no-daemon run

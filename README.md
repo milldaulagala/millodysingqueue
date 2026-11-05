@@ -8,7 +8,7 @@ This is a personal showcase project, developed incrementally through small, test
 
 ## Project status
 
-Task 1004 adds song saving and a searchable song library alongside singer registration. The Java/GWT frontend has Singers/Songs navigation and a cream-orange, white and navy theme. The Kotlin/Ktor JSON API stores singers and songs in PostgreSQL through Exposed SQL DSL and HikariCP, using the restricted application role. Liquibase manages explicit schema migrations. Song assignments, karaoke nights, playback, editing/deleting, authentication and AWS deployment are later increments. This version is for localhost use only.
+Task 1005 adds workspace ownership to existing singer and song management. A configured local workspace scopes database access and duplicate rules; this is an ownership foundation, not authentication. The Java/GWT frontend and Kotlin/Ktor JSON API remain unchanged for users. PostgreSQL ownership is migrated explicitly through Liquibase, preserving existing records. Events, performances, authentication and AWS deployment are later increments. This version is for localhost use only. See [Workspace ownership](docs/workspace-management.md) for the upgrade and security boundary.
 
 ## Quick start
 
@@ -28,6 +28,8 @@ From the repository root, build and test both components:
 ```
 
 Gradle invokes `frontend/mvnw clean verify` when frontend inputs change, compiles the GWT application, includes its public assets in the backend resources, runs the backend tests, and creates application distributions. The frontend clean prevents deleted assets lingering in later packages. Generated files remain under `frontend/target/` and `backend/build/` and are excluded from Git.
+
+For an existing checkout, follow the [workspace upgrade instructions](docs/workspace-management.md#local-setup) and add `APPLICATION_WORKSPACE_ID` to `.env` before starting.
 
 Start the integrated application from the repository root:
 
@@ -61,8 +63,9 @@ This is a process health endpoint, not a database-readiness check. Startup requi
 | `APPLICATION_DB_URL` | Required | PostgreSQL JDBC URL |
 | `APPLICATION_DB_USER` | Required | Restricted application login (`millody_app` locally) |
 | `APPLICATION_DB_PASSWORD` | Required | Application database password |
+| `APPLICATION_WORKSPACE_ID` | Required | Existing development workspace ID (`1` after a fresh migration) |
 
-For example, run `PORT=8081 ./scripts/run.sh` from the repository root to use another port. The application defaults to localhost because authentication is not implemented yet. Container deployment will explicitly set `HOST=0.0.0.0` in a later increment. Ktor reads environment variables directly. The local `scripts/run.sh` helper loads the trusted `.env` and supplies local URL/user defaults for existing task 1002 files. Direct Gradle and packaged launches require the three application variables to be exported.
+For example, run `PORT=8081 ./scripts/run.sh` from the repository root to use another port. The application defaults to localhost because authentication is not implemented yet. Container deployment will explicitly set `HOST=0.0.0.0` in a later increment. Ktor reads environment variables directly. The local `scripts/run.sh` helper loads the trusted `.env` and supplies local URL/user defaults for existing task 1002 files. Direct Gradle and packaged launches require the three `APPLICATION_DB_*` variables and `APPLICATION_WORKSPACE_ID` to be exported.
 
 ### Run the packaged distribution
 
@@ -147,7 +150,7 @@ GitHub Actions runs the integrated clean build on pull requests and pushes to `m
 1. Open the repository folder.
 2. Link/import `backend/build.gradle.kts` as a Gradle project and `frontend/pom.xml` as a Maven project.
 3. Select **JDK 21** for the project SDK, Gradle JVM, and Maven runner/importer; use the project wrappers.
-4. Configure the three `APPLICATION_DB_*` environment variables in your backend Gradle `run` configuration, or use `./scripts/run.sh` in the terminal. It builds the frontend before starting Ktor. Stop and rerun after editing frontend source.
+4. Configure the three `APPLICATION_DB_*` environment variables and `APPLICATION_WORKSPACE_ID` in your backend Gradle `run` configuration, or use `./scripts/run.sh` in the terminal. It builds the frontend before starting Ktor. Stop and rerun after editing frontend source.
 
 Specialised GWT/Ktor IDE plugins are optional; the wrapper commands are the reference build workflow. `.editorconfig` uses four spaces for Java/Kotlin/TypeScript and two for YAML. Generated wrapper scripts retain upstream formatting.
 

@@ -6,4 +6,5 @@
     <include file="changes/001-create-singers.sql" relativeToChangelogFile="true"/>
     <include file="changes/002-unique-singer-nickname.sql" relativeToChangelogFile="true"/>
     <include file="changes/003-create-songs.sql" relativeToChangelogFile="true"/>
+    <include file="changes/004-add-workspaces.sql" relativeToChangelogFile="true"/>
 </databaseChangeLog>

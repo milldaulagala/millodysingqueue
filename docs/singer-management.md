@@ -6,6 +6,8 @@ Task 1003 delivers a local admin screen to register singers and search the direc
 
 Singer names are not unique. When a nickname is provided, the singer name and nickname together must be unique, ignoring case and surrounding spaces. For example, Mill / Bandara cannot be registered twice, but Mill / Host and Mick / Bandara are allowed. Nickname remains optional; multiple singers with the same name and no nickname are still permitted. PostgreSQL generates the permanent `singer_id`; email is optional and is never the primary key.
 
+Task 1005 scopes these records and duplicate rules to the configured workspace. See [Workspace ownership](workspace-management.md) for setup and the authentication boundary.
+
 ## Start locally
 
 From the repository root, with JDK 21 selected:
@@ -20,11 +22,11 @@ docker compose up -d --wait postgres
 ./scripts/run.sh
 ```
 
-If `.env` already exists, skip the setup command. The run helper loads that trusted local file and supplies application URL/user defaults compatible with files generated in task 1002. It uses `APPLICATION_DB_PASSWORD`, never the migration or administrator password. No passwords are printed. Stop Ktor with Control+C; the connection pool closes during shutdown.
+If `.env` already exists, skip the setup command and add `APPLICATION_WORKSPACE_ID` following the [workspace upgrade instructions](workspace-management.md#local-setup). The run helper loads that trusted local file and supplies application URL/user defaults compatible with files generated in task 1002. It uses `APPLICATION_DB_PASSWORD`, never the migration or administrator password. No passwords are printed. Stop Ktor with Control+C; the connection pool closes during shutdown.
 
 Open [http://localhost:8080](http://localhost:8080). To use another port, run `PORT=8081 ./scripts/run.sh`. The application does not automatically start PostgreSQL or run Liquibase. If database credentials are missing or PostgreSQL is unavailable at startup, startup fails rather than substituting in-memory storage.
 
-For an IntelliJ Gradle `run` configuration, supply `APPLICATION_DB_URL`, `APPLICATION_DB_USER`, and `APPLICATION_DB_PASSWORD` as environment variables. Keep credentials in your local run configuration, outside Git. Running the helper in IntelliJ's terminal is also supported.
+For an IntelliJ Gradle `run` configuration, supply `APPLICATION_DB_URL`, `APPLICATION_DB_USER`, `APPLICATION_DB_PASSWORD`, and `APPLICATION_WORKSPACE_ID` as environment variables. Keep credentials in your local run configuration, outside Git. Running the helper in IntelliJ's terminal is also supported.
 
 ## Screen behaviour
 

@@ -1,11 +1,13 @@
 package com.millodysingqueue.singer
 
+import com.millodysingqueue.workspace.WorkspaceContext
 import java.sql.SQLException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.lowerCase
 import org.jetbrains.exposed.v1.javatime.timestampWithTimeZone
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -16,6 +18,7 @@ import org.postgresql.util.PSQLException
 import org.slf4j.LoggerFactory
 
 private object Singers : Table("app.singers") {
+    val workspaceId = long("workspace_id")
     val id = long("singer_id").autoIncrement()
     val name = text("singer_name")
     val nickname = text("nick_name").nullable()
@@ -24,9 +27,10 @@ private object Singers : Table("app.singers") {
     override val primaryKey = PrimaryKey(id)
 }
 
-class ExposedSingerRepository(private val database: Database) : SingerRepository {
+class ExposedSingerRepository(private val database: Database, private val workspace: WorkspaceContext) : SingerRepository {
     override suspend fun create(singer: NewSinger): Singer = query {
         Singers.insertReturning {
+            it[workspaceId] = workspace.workspaceId
             it[name] = singer.singerName
             it[nickname] = singer.nickName
             it[email] = singer.email
@@ -34,7 +38,7 @@ class ExposedSingerRepository(private val database: Database) : SingerRepository
     }
 
     override suspend fun list(): List<Singer> = query {
-        Singers.selectAll()
+        Singers.selectAll().where { Singers.workspaceId eq workspace.workspaceId }
             .orderBy(Singers.name.lowerCase() to SortOrder.ASC, Singers.id to SortOrder.ASC)
             .map { it.toSinger() }
     }

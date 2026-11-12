@@ -6,7 +6,7 @@ import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.Label;
 import com.google.gwt.user.client.ui.TextBox;
 
-/** Shared form semantics and presentation for the two admin screens. */
+/** Shared form semantics and presentation for admin screens. */
 final class ScreenWidgets {
     private ScreenWidgets() {}
 

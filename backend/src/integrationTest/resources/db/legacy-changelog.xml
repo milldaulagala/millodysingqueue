@@ -5,4 +5,5 @@
     <include file="db/changelog/changes/001-create-singers.sql"/>
     <include file="db/changelog/changes/002-unique-singer-nickname.sql"/>
     <include file="db/changelog/changes/003-create-songs.sql"/>
+    <include file="db/changelog/changes/004-add-workspaces.sql"/>
 </databaseChangeLog>

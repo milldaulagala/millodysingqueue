@@ -2,7 +2,7 @@
 
 ## Scope
 
-Task 1003 delivers a local admin screen to register singers and search the directory. Task 1004 adds the Songs screen alongside this feature; queue, login, edit and delete screens remain later increments. Keep the application on localhost until authentication and authorisation are implemented.
+Task 1003 delivers a local admin screen to register singers and search the directory. Task 1004 adds the Songs screen alongside this feature; Task 1006 adds the [Performances page](performance-management.md); login, editing and deletion remain later increments. Keep the application on localhost until authentication and authorisation are implemented.
 
 Singer names are not unique. When a nickname is provided, the singer name and nickname together must be unique, ignoring case and surrounding spaces. For example, Mill / Bandara cannot be registered twice, but Mill / Host and Mick / Bandara are allowed. Nickname remains optional; multiple singers with the same name and no nickname are still permitted. PostgreSQL generates the permanent `singer_id`; email is optional and is never the primary key.
 

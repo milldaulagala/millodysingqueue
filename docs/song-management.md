@@ -2,9 +2,9 @@
 
 ## Scope
 
-Task 1004 adds a **Save a song** form, searchable song library, and Singers/Songs navigation. It stores song metadata and a YouTube video ID. It does not assign songs to singers, create nights, order performances, search YouTube, or play embedded videos. These are separate increments.
+Task 1004 adds a **Save a song** form, searchable song library, and Singers/Songs navigation. It stores song metadata and a YouTube video ID. It does not assign songs to singers, create nights, order performances, search YouTube, or play embedded videos. Task 1006 adds assignments to events through [Performance management](performance-management.md); playback and other capabilities remain separate increments.
 
-Both pages keep the cream-orange background and white cards. Primary text and headings use navy `#183153`; section labels and primary buttons remain teal. The shared navigation uses `#singers` and `#songs` so refresh, bookmarks, and browser Back/Forward work. Unrecognised fragments fall back to Singers. Switching screens keeps unfinished forms and search text in memory; a full page reload clears unfinished input.
+Both pages keep the cream-orange background and white cards. Primary text and headings use navy `#183153`; section labels and primary buttons remain teal. The shared navigation uses `#singers` and `#songs` so refresh, bookmarks, and browser Back/Forward work. Task 1006 makes Performances the default for empty/unrecognised fragments. Switching screens keeps unfinished forms and search text in memory; a full page reload clears unfinished input.
 
 Task 1005 scopes these records and duplicate rules to the configured workspace. See [Workspace ownership](workspace-management.md) for setup and the authentication boundary.
 

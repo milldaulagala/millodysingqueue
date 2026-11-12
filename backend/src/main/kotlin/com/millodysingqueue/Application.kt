@@ -1,5 +1,12 @@
 package com.millodysingqueue
 
+import com.millodysingqueue.performance.ExposedPerformanceRepository
+import com.millodysingqueue.performance.PerformanceNotFoundException
+import com.millodysingqueue.performance.PerformanceService
+import com.millodysingqueue.performance.PerformanceStorageException
+import com.millodysingqueue.performance.PerformanceValidationException
+import com.millodysingqueue.performance.StaleQueueException
+import com.millodysingqueue.performance.performanceRoutes
 import com.millodysingqueue.database.ApplicationDatabase
 import com.millodysingqueue.singer.DuplicateSingerEmailException
 import com.millodysingqueue.singer.DuplicateSingerNicknameException
@@ -40,7 +47,8 @@ fun Application.module() {
     try {
         workspace.requireExists(database.database)
         configureApplication(SingerService(ExposedSingerRepository(database.database, workspace)),
-            SongService(ExposedSongRepository(database.database, workspace)))
+            SongService(ExposedSongRepository(database.database, workspace)),
+            PerformanceService(ExposedPerformanceRepository(database.database, workspace)))
     } catch (exception: Exception) {
         database.close()
         throw exception
@@ -48,9 +56,21 @@ fun Application.module() {
 }
 
 /** Explicit dependencies keep API tests independent of production connections. */
-fun Application.configureApplication(singers: SingerService, songs: SongService) {
+fun Application.configureApplication(singers: SingerService, songs: SongService, performances: PerformanceService) {
     install(ContentNegotiation) { json() }
     install(StatusPages) {
+        exception<PerformanceValidationException> { call, cause ->
+            call.respond(HttpStatusCode.BadRequest, ApiError("VALIDATION_ERROR", cause.message!!, cause.fields))
+        }
+        exception<PerformanceNotFoundException> { call, cause ->
+            call.respond(HttpStatusCode.NotFound, ApiError("NOT_FOUND", cause.message!!))
+        }
+        exception<StaleQueueException> { call, cause ->
+            call.respond(HttpStatusCode.Conflict, ApiError("STALE_QUEUE", cause.message!!))
+        }
+        exception<PerformanceStorageException> { call, cause ->
+            call.respond(HttpStatusCode.ServiceUnavailable, ApiError("STORAGE_UNAVAILABLE", cause.message!!))
+        }
         exception<SongValidationException> { call, cause ->
             call.respond(HttpStatusCode.BadRequest, ApiError("VALIDATION_ERROR", cause.message!!, cause.fieldErrors))
         }
@@ -97,6 +117,7 @@ fun Application.configureApplication(singers: SingerService, songs: SongService)
         }
         singerRoutes(singers)
         songRoutes(songs)
+        performanceRoutes(performances)
         staticResources("/", "static")
     }
 }

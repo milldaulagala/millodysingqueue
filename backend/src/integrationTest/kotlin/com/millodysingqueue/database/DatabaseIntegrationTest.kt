@@ -1,5 +1,7 @@
 package com.millodysingqueue.database
 
+import com.millodysingqueue.performance.*
+import java.time.LocalDate
 import com.millodysingqueue.workspace.WorkspaceContext
 import com.millodysingqueue.module
 import com.millodysingqueue.singer.DuplicateSingerEmailException
@@ -90,7 +92,7 @@ class DatabaseIntegrationTest {
         val singerBefore = asMigrator { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("SELECT setval('app.singers_singer_id_seq', 5)")
-                statement.executeQuery("INSERT INTO app.singers (singer_name, nick_name, email) VALUES ('Mill', 'Bandara', 'mill@example.com') RETURNING singer_id, singer_name, nick_name, email, created_at").use { result ->
+                statement.executeQuery("INSERT INTO app.singers (workspace_id, singer_name, nick_name, email) VALUES (1, 'Mill', 'Bandara', 'mill@example.com') RETURNING singer_id, singer_name, nick_name, email, created_at").use { result ->
                     assertTrue(result.next())
                     (1..5).map { result.getString(it) }
                 }
@@ -98,16 +100,16 @@ class DatabaseIntegrationTest {
         }
         val songBefore = asMigrator { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("INSERT INTO app.songs (title, artist, youtube_video_id) VALUES ('Country Roads', 'John Denver', '7aNW9hRKYA8') RETURNING song_id, title, artist, youtube_video_id, created_at").use { result ->
+                statement.executeQuery("INSERT INTO app.songs (workspace_id, title, artist, youtube_video_id) VALUES (1, 'Country Roads', 'John Denver', '7aNW9hRKYA8') RETURNING song_id, title, artist, youtube_video_id, created_at").use { result ->
                     assertTrue(result.next())
                     (1..5).map { result.getString(it) }
                 }
             }
         }
         val previousChanges = changeRecords()
-        assertEquals(3, previousChanges.size)
+        assertEquals(4, previousChanges.size)
         migrate("update")
-        assertEquals(previousChanges, changeRecords().take(3), "Existing migration records must not change")
+        assertEquals(previousChanges, changeRecords().take(4), "Existing migration records must not change")
         asApplication { connection ->
             assertTrue(insertSinger(connection, "After upgrade") > singerBefore.first().toLong(),
                 "Upgrade must preserve the identity sequence as well as existing IDs")
@@ -130,7 +132,7 @@ class DatabaseIntegrationTest {
     fun clearData() {
         asMigrator { connection ->
             connection.createStatement().use { statement ->
-                statement.execute("TRUNCATE app.singers, app.songs RESTART IDENTITY")
+                statement.execute("TRUNCATE app.performances, app.events, app.singers, app.songs RESTART IDENTITY")
                 statement.execute("DELETE FROM app.workspaces WHERE workspace_id <> 1")
             }
         }
@@ -139,7 +141,7 @@ class DatabaseIntegrationTest {
     @Test
     fun `migrations rerun safely without changing their execution records`() {
         val before = changeRecords()
-        assertEquals(4, before.size)
+        assertEquals(5, before.size)
         migrate("update")
         migrate("validate")
         migrate("status")
@@ -647,6 +649,194 @@ class DatabaseIntegrationTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `performance order and cancellation persist across pools including repeated selections`() = runBlocking {
+        var eventId = 0L
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val (event, singer, song) = performanceFixture(managed)
+            eventId = event
+            val repository = ExposedPerformanceRepository(managed.database, WorkspaceContext(1))
+            val first = repository.add(event, singer, song, 0)
+            val second = repository.add(event, singer, song, 1)
+            assertEquals(listOf(1L, 2L), second.performances.map { it.queuePosition })
+            val moved = repository.move(event, second.performances[1].performanceId, "UP", 2)
+            assertEquals(second.performances[1].performanceId, moved.performances[0].performanceId)
+            assertFailsWith<PerformanceValidationException> { repository.move(event, moved.performances[0].performanceId, "UP", 3) }
+            assertEquals(3L, repository.queue(event).queueVersion)
+            val cancelled = repository.cancel(event, moved.performances[0].performanceId, 3)
+            assertEquals(listOf(first.performances[0].performanceId), cancelled.performances.map { it.performanceId })
+            assertFailsWith<StaleQueueException> { repository.add(event, singer, song, 3) }
+            assertFailsWith<PerformanceNotFoundException> { repository.cancel(event, moved.performances[0].performanceId, 4) }
+            asApplication { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT status FROM app.performances ORDER BY performance_id").use { result ->
+                        assertTrue(result.next()); assertEquals("WAITING", result.getString(1))
+                        assertTrue(result.next()); assertEquals("CANCELLED", result.getString(1))
+                    }
+                }
+            }
+        }
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val queue = ExposedPerformanceRepository(managed.database, WorkspaceContext(1)).queue(eventId)
+            assertEquals(4L, queue.queueVersion)
+            assertEquals(1, queue.performances.size)
+            assertEquals("Mill", queue.performances[0].singerName)
+            assertEquals("Country Roads", queue.performances[0].songTitle)
+        }
+    }
+
+    @Test
+    fun `events and performances reject other workspace references at repository and database boundaries`() = runBlocking {
+        val other = createWorkspace()
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val (event, singer, song) = performanceFixture(managed)
+            val (otherEvent, otherSinger, otherSong) = performanceFixture(managed, other)
+            val repository = ExposedPerformanceRepository(managed.database, WorkspaceContext(1))
+            assertEquals(listOf(event), repository.events().map { it.eventId })
+            assertFailsWith<PerformanceNotFoundException> { repository.queue(otherEvent) }
+            assertFailsWith<PerformanceNotFoundException> { repository.add(otherEvent, singer, song, 0) }
+            assertFailsWith<PerformanceValidationException> { repository.add(event, otherSinger, song, 0) }
+            assertFailsWith<PerformanceValidationException> { repository.add(event, singer, otherSong, 0) }
+            assertFailsWith<PerformanceValidationException> { repository.add(event, Long.MAX_VALUE, Long.MAX_VALUE, 0) }
+            assertTrue(repository.queue(event).performances.isEmpty())
+            asApplication { connection ->
+                for ((e, si, so) in listOf(Triple(otherEvent, singer, song), Triple(event, otherSinger, song), Triple(event, singer, otherSong))) {
+                    assertEquals("23503", assertFailsWith<SQLException> {
+                        connection.createStatement().use { it.execute("INSERT INTO app.performances (workspace_id, event_id, singer_id, song_id, queue_position) VALUES (1, $e, $si, $so, 1)") }
+                    }.sqlState)
+                }
+                connection.createStatement().use { statement ->
+                    for ((position, status) in listOf(0 to "WAITING", 1 to "COMPLETED")) {
+                        assertEquals("23514", assertFailsWith<SQLException> {
+                            statement.execute("INSERT INTO app.performances (workspace_id, event_id, singer_id, song_id, queue_position, status) VALUES (1, $event, $singer, $song, $position, '$status')")
+                        }.sqlState)
+                    }
+                }
+            }
+            repository.add(event, singer, song, 0)
+            asApplication { connection ->
+                for (sql in listOf(
+                    "INSERT INTO app.performances (workspace_id, event_id, singer_id, song_id, queue_position) VALUES (1, $event, $singer, $song, 1)",
+                    "DELETE FROM app.events WHERE event_id = $event",
+                    "DELETE FROM app.singers WHERE singer_id = $singer",
+                    "DELETE FROM app.songs WHERE song_id = $song",
+                )) {
+                    val expected = if (sql.startsWith("INSERT")) "23505" else "23503"
+                    assertEquals(expected, assertFailsWith<SQLException> { connection.createStatement().use { it.execute(sql) } }.sqlState)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `concurrent additions compare versions under the same event lock without losing changes`() = runBlocking {
+        ApplicationDatabase(runtimeConfig()).use { first ->
+            ApplicationDatabase(runtimeConfig()).use { second ->
+                val (event, singer, song) = performanceFixture(first)
+                val start = CompletableDeferred<Unit>()
+                val attempts = listOf(first, second).map { managed -> async {
+                    start.await()
+                    try {
+                        ExposedPerformanceRepository(managed.database, WorkspaceContext(1)).add(event, singer, song, 0)
+                        "saved"
+                    } catch (_: StaleQueueException) { "stale" }
+                } }
+                start.complete(Unit)
+                assertEquals(listOf("saved", "stale"), attempts.awaitAll().sorted())
+                val repository = ExposedPerformanceRepository(first.database, WorkspaceContext(1))
+                val refreshed = repository.queue(event)
+                assertEquals(1, refreshed.performances.size)
+                val next = repository.add(event, singer, song, refreshed.queueVersion)
+                assertEquals(listOf(1L, 2L), next.performances.map { it.queuePosition })
+            }
+        }
+    }
+
+    @Test
+    fun `concurrent move and cancellation cannot overwrite one another`() = runBlocking {
+        ApplicationDatabase(runtimeConfig()).use { first ->
+            ApplicationDatabase(runtimeConfig()).use { second ->
+                val (event, singer, song) = performanceFixture(first)
+                val one = ExposedPerformanceRepository(first.database, WorkspaceContext(1))
+                val two = ExposedPerformanceRepository(second.database, WorkspaceContext(1))
+                one.add(event, singer, song, 0)
+                val id = one.add(event, singer, song, 1).performances[1].performanceId
+                val start = CompletableDeferred<Unit>()
+                val operations = listOf<suspend () -> Unit>({ one.move(event, id, "UP", 2) }, { two.cancel(event, id, 2) })
+                val attempts = operations.map { operation -> async {
+                    start.await()
+                    try { operation(); "saved" } catch (_: StaleQueueException) { "stale" }
+                } }
+                start.complete(Unit)
+                assertEquals(listOf("saved", "stale"), attempts.awaitAll().sorted())
+                assertEquals(3L, one.queue(event).queueVersion)
+            }
+        }
+    }
+
+    @Test
+    fun `two hundred performances can be ordered cancelled and appended`() = runBlocking {
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val (event, singer, song) = performanceFixture(managed)
+            val repository = ExposedPerformanceRepository(managed.database, WorkspaceContext(1))
+            repeat(200) { index -> repository.add(event, singer, song, index.toLong()) }
+            val initial = repository.queue(event)
+            assertEquals(200, initial.performances.size)
+            assertEquals((1L..200L).toList(), initial.performances.map { it.queuePosition })
+            val moved = repository.move(event, initial.performances.last().performanceId, "UP", 200)
+            assertEquals(initial.performances.last().performanceId, moved.performances[198].performanceId)
+            repository.cancel(event, initial.performances[99].performanceId, 201)
+            val appended = repository.add(event, singer, song, 202)
+            assertEquals(200, appended.performances.size)
+            assertEquals(201L, appended.performances.last().queuePosition)
+            assertEquals(203L, appended.queueVersion)
+        }
+    }
+
+    @Test
+    fun `performance HTTP API uses database ownership version errors and safe storage failures`() = testApplication {
+        var event = 0L
+        var singer = 0L
+        var song = 0L
+        ApplicationDatabase(runtimeConfig()).use { managed ->
+            val fixture = performanceFixture(managed)
+            event = fixture.first; singer = fixture.second; song = fixture.third
+        }
+        environment { config = runtimeConfig() }
+        application { module() }
+        val path = "/api/events/$event/performances"
+        val created = client.post(path) {
+            contentType(ContentType.Application.Json)
+            setBody("""{"singerId":"$singer","songId":"$song","queueVersion":"0"}""")
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        val response = Json.decodeFromString<QueueResponse>(created.bodyAsText())
+        assertEquals("1", response.queueVersion)
+        val stale = client.post("$path/${response.performances[0].performanceId}/cancel") {
+            contentType(ContentType.Application.Json); setBody("""{"queueVersion":"0"}""")
+        }
+        assertEquals(HttpStatusCode.Conflict, stale.status)
+        val other = createWorkspace()
+        var otherEvent = 0L
+        ApplicationDatabase(runtimeConfig()).use { managed -> otherEvent = performanceFixture(managed, other).first }
+        assertEquals(HttpStatusCode.NotFound, client.get("/api/events/$otherEvent/performances").status)
+        asMigrator { connection -> connection.createStatement().use { it.execute("REVOKE SELECT ON app.events FROM millody_app") } }
+        try {
+            assertEquals(HttpStatusCode.ServiceUnavailable, client.get("/api/events").status)
+        } finally {
+            asMigrator { connection -> connection.createStatement().use { it.execute("GRANT SELECT ON app.events TO millody_app") } }
+        }
+    }
+
+    private suspend fun performanceFixture(managed: ApplicationDatabase, workspace: Long = 1): Triple<Long, Long, Long> {
+        val scope = WorkspaceContext(workspace)
+        val event = ExposedPerformanceRepository(managed.database, scope)
+            .createEvent(NewEvent("Friday at Mill’s", LocalDate.parse("2026-11-13"), "Mill"))
+        val singer = ExposedSingerRepository(managed.database, scope).create(NewSinger("Mill", "Host", null))
+        val song = ExposedSongRepository(managed.database, scope).create(NewSong("Country Roads", "John Denver", "7aNW9hRKYA8"))
+        return Triple(event.eventId, singer.singerId, song.songId)
     }
 
     private fun runtimeConfig(workspaceId: Long = 1) = MapApplicationConfig(

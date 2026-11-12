@@ -11,6 +11,8 @@ import com.google.gwt.user.client.ui.RootPanel;
 import com.google.gwt.user.client.ui.SimplePanel;
 
 public final class MillodySingQueueEntryPoint implements EntryPoint {
+    private final PerformanceScreen performances = new PerformanceScreen();
+    private final Anchor performancesLink = new Anchor("Performances", "#performances");
     private final SingerScreen singers = new SingerScreen();
     private final SongScreen songs = new SongScreen();
     private final SimplePanel screen = new SimplePanel();
@@ -31,6 +33,7 @@ public final class MillodySingQueueEntryPoint implements EntryPoint {
         FlowPanel navigation = panel("main-navigation");
         navigation.getElement().setAttribute("role", "navigation");
         navigation.getElement().setAttribute("aria-label", "Main navigation");
+        navigation.add(performancesLink);
         navigation.add(singersLink);
         navigation.add(songsLink);
         header.add(navigation);
@@ -43,11 +46,14 @@ public final class MillodySingQueueEntryPoint implements EntryPoint {
 
     private void showScreen(String token) {
         boolean showSongs = "songs".equals(token);
-        screen.setWidget(showSongs ? songs : singers);
-        select(singersLink, !showSongs);
+        boolean showSingers = "singers".equals(token);
+        screen.setWidget(showSongs ? songs : showSingers ? singers : performances);
+        select(performancesLink, !showSongs && !showSingers);
+        select(singersLink, showSingers);
         select(songsLink, showSongs);
         if (showSongs) songs.onShow();
-        else singers.onShow();
+        else if (showSingers) singers.onShow();
+        else performances.onShow();
     }
 
     private void select(Anchor link, boolean selected) {

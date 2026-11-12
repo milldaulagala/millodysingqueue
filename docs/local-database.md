@@ -165,3 +165,7 @@ An empty volume reruns bootstrap using the current `.env`. Do not use `colima de
 ## Workspace ownership
 
 Migration 004 adds `app.workspaces` and required ownership on singers/songs, preserving existing records. Duplicate rules are now workspace-specific. Add `APPLICATION_WORKSPACE_ID` to existing `.env` files after applying the migration. See [Workspace ownership and upgrade](workspace-management.md) for commands, privileges and isolation tests.
+
+## Events and performances
+
+Migration 005 adds workspace-owned events and performances, composite foreign keys, queue versions and durable positions. It preserves singers, songs and workspaces. Apply it explicitly before running task 1006. See [Performance management](performance-management.md) for the API, ordering transactions and browser checks.

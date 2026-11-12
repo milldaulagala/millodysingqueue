@@ -30,6 +30,10 @@ final class JsonApi {
     }
 
     void send(RequestBuilder.Method method, String payload, Callback<JSONValue> callback) {
+        send(method, payload, payload == null ? 200 : 201, callback);
+    }
+
+    void send(RequestBuilder.Method method, String payload, int expectedStatus, Callback<JSONValue> callback) {
         RequestBuilder builder = new RequestBuilder(method, GWT.getHostPageBaseURL() + path);
         builder.setHeader("Accept", "application/json");
         if (payload != null) builder.setHeader("Content-Type", "application/json");
@@ -47,7 +51,7 @@ final class JsonApi {
                         callback.onFailure(networkMessage, Map.of());
                         return;
                     }
-                    if (response.getStatusCode() == (payload == null ? 200 : 201)) {
+                    if (response.getStatusCode() == expectedStatus) {
                         callback.onSuccess(body);
                         return;
                     }

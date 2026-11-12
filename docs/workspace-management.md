@@ -55,7 +55,7 @@ Before public use, authenticated membership must resolve the authorised workspac
 ./scripts/check.sh
 ```
 
-The PostgreSQL integration fixture first applies migrations 001–003, inserts representative legacy singer/song records, and upgrades to the current schema. It verifies the original IDs, values, timestamps and migration execution records are preserved. A separate empty test database verifies a full fresh installation and runtime privileges. The migration preview checks DDL without applying it, and changesets are rerun/validated for idempotency.
+The PostgreSQL integration fixture first applies migrations 001–004, inserts representative legacy singer/song records, and upgrades to the current schema. It verifies the original IDs, values, timestamps and migration execution records are preserved. A separate empty test database verifies a full fresh installation and runtime privileges. The migration preview checks DDL without applying it, and changesets are rerun/validated for idempotency.
 
 Tests cover workspace-scoped listing and inserts, duplicates within/across workspaces, missing/nonexistent ownership, restricted workspace administration, configuration validation and client attempts to select another workspace. Existing concurrency and singer/song API tests remain in the full suite. All integration data lives in disposable containers, separate from your Compose database.
 
@@ -66,4 +66,4 @@ Manual acceptance checks:
 3. Register a singer and save a song, then refresh and search both lists.
 4. Verify existing duplicate messages still appear.
 
-No login, memberships, billing, events, performances or workspace-management UI is included in this increment.
+Task 1005 introduced no login, memberships, billing or workspace-management UI. Task 1006 adds workspace-owned [events and performances](performance-management.md).

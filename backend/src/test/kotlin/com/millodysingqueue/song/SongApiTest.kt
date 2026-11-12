@@ -1,5 +1,7 @@
 package com.millodysingqueue.song
 
+import com.millodysingqueue.performance.PerformanceService
+import com.millodysingqueue.FakePerformanceRepository
 import com.millodysingqueue.ApiError
 import com.millodysingqueue.FakeSingerRepository
 import com.millodysingqueue.FakeSongRepository
@@ -24,7 +26,7 @@ class SongApiTest {
     @Test
     fun `save returns created JSON and the uncached library is ordered`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository()), PerformanceService(FakePerformanceRepository())) }
         assertEquals("[]", client.get("/api/songs").bodyAsText())
         val saved = client.post("/api/songs") {
             contentType(ContentType.Application.Json)
@@ -49,7 +51,7 @@ class SongApiTest {
     @Test
     fun `invalid input returns field errors and no song is saved`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository()), PerformanceService(FakePerformanceRepository())) }
         val response = client.post("/api/songs") { contentType(ContentType.Application.Json); setBody("{}") }
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertEquals(setOf("title", "artist", "youtubeVideo"),
@@ -60,7 +62,7 @@ class SongApiTest {
     @Test
     fun `malformed JSON wrong field types and unexpected fields are rejected`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository()), PerformanceService(FakePerformanceRepository())) }
         for (body in listOf("{", "[]", "null", """{"title":12}""", """{"artist":true}""",
             """{"youtubeVideo":[]}""", """{"extra":"value"}""")) {
             val response = client.post("/api/songs") { contentType(ContentType.Application.Json); setBody(body) }
@@ -75,7 +77,7 @@ class SongApiTest {
     @Test
     fun `duplicate video returns a conflict attached to the video field`() = testApplication {
         environment { config = MapApplicationConfig() }
-        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository())) }
+        application { configureApplication(SingerService(FakeSingerRepository()), SongService(FakeSongRepository()), PerformanceService(FakePerformanceRepository())) }
         suspend fun save(video: String) = client.post("/api/songs") {
             contentType(ContentType.Application.Json)
             setBody(Json.encodeToString(SaveSongRequest("Country Roads", "John Denver", video)))
@@ -92,7 +94,7 @@ class SongApiTest {
     fun `storage failures produce safe errors for listing and saving`() = testApplication {
         environment { config = MapApplicationConfig() }
         application { configureApplication(SingerService(FakeSingerRepository()),
-            SongService(FakeSongRepository().apply { unavailable = true })) }
+            SongService(FakeSongRepository().apply { unavailable = true }), PerformanceService(FakePerformanceRepository())) }
         val responses = listOf(client.get("/api/songs"), client.post("/api/songs") {
             contentType(ContentType.Application.Json)
             setBody(Json.encodeToString(SaveSongRequest("Country Roads", "John Denver", "7aNW9hRKYA8")))

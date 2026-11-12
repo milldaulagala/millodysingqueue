@@ -8,7 +8,7 @@ This is a personal showcase project, developed incrementally through small, test
 
 ## Project status
 
-Task 1005 adds workspace ownership to existing singer and song management. A configured local workspace scopes database access and duplicate rules; this is an ownership foundation, not authentication. The Java/GWT frontend and Kotlin/Ktor JSON API remain unchanged for users. PostgreSQL ownership is migrated explicitly through Liquibase, preserving existing records. Events, performances, authentication and AWS deployment are later increments. This version is for localhost use only. See [Workspace ownership](docs/workspace-management.md) for the upgrade and security boundary.
+Task 1006 adds events and performance management: create a karaoke night, choose existing singers/songs, and save, reorder or cancel performances. Workspace ownership, database constraints and queue-version checks protect data integrity. The Java/GWT frontend is served by the Kotlin/Ktor backend. Playback, history views, authentication and AWS deployment are later increments. This version is for localhost use only. See [Performance management](docs/performance-management.md) and [Workspace ownership](docs/workspace-management.md).
 
 ## Quick start
 
@@ -38,7 +38,7 @@ Start the integrated application from the repository root:
 ./scripts/run.sh
 ```
 
-Open [http://localhost:8080](http://localhost:8080). The page shows singer registration and the directory. Select **Songs** to save a song and search the library, or open [Songs directly](http://localhost:8080/#songs). See [Singer management](docs/singer-management.md) and [Song management](docs/song-management.md) for API contracts, validation rules and browser checks. Stop the server with **Control + C**.
+Open [http://localhost:8080](http://localhost:8080). The default page is **Performances**, where you can create a night and organise its singing order. Select **Singers** for registration or **Songs** to save/search karaoke videos. See [Performance management](docs/performance-management.md) for the new workflow and API. See [Singer management](docs/singer-management.md) and [Song management](docs/song-management.md) for API contracts, validation rules and browser checks. Stop the server with **Control + C**.
 
 Check the JSON endpoint separately:
 

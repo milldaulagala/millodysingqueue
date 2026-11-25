@@ -33,6 +33,23 @@ The create form requires name/organiser (trimmed, nonblank, at most 200 characte
 
 If no singers or songs exist, use the Singers/Songs navigation to register/save them and return. Refresh reloads selector data and the order. Failed saves preserve input. Mutations disable competing controls, and POSTs are never automatically retried. After an unconfirmed or rejected order change, refresh before trying again: the server may already have committed it.
 
+## Responsive layout
+
+Task 1007 uses explicit CSS grid areas to prevent singer names from collapsing while resizing:
+
+| Viewport width (CSS pixels) | Performance layout |
+| --- | --- |
+| Above 1100 | Desktop columns for number, avatar, singer, song and actions |
+| Above 850 through 1100 | Sidebar remains beside the order; song details occupy a second row |
+| Above 650 through 850 | Sidebar moves below the order, restoring full-width performance columns |
+| 650 and below | Stacked mobile rows with song details and actions below the singer |
+
+The event selector and Create night button share the first row at tablet widths; date and organiser details occupy the next row. On mobile the event fields stack explicitly, without an orphaned separator beside the organiser. The Saved badge remains beside the Singing order heading.
+
+Header and page content use matching centred containers. A stable page scrollbar gutter keeps horizontal positioning consistent when changing between pages with different content heights. Long text wraps inside its allocated space; overflow is not hidden to conceal layout errors. Desktop queue scrolling and mobile page scrolling remain unchanged.
+
+For responsive verification, inspect all three navigation pages at 320, 390, 499, 650, 651, 768, 850, 851, 1056, 1100, 1101 and 1417 pixels. Also inspect 649, 849 and 1099 pixels on Performances. Include long singer names, unbroken nicknames and long song titles, confirm no horizontal page overflow or overlapping controls, and compare header/content edges while switching pages. Check the Create night form open and closed, keyboard navigation and the scrollable order. These are browser acceptance checks; backend tests do not validate CSS layout.
+
 ## Data and ownership
 
 `events`: generated BIGINT `event_id`, `workspace_id`, `event_name`, `event_date`, `organiser_name`, `queue_version` (initially 0), `created_at` (TIMESTAMPTZ).

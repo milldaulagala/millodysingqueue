@@ -23,20 +23,22 @@ public final class MillodySingQueueEntryPoint implements EntryPoint {
     public void onModuleLoad() {
         FlowPanel shell = panel("shell");
         FlowPanel header = panel("site-header");
+        FlowPanel headerContent = panel("header-content");
         FlowPanel brand = panel("brand");
         brand.add(text("♪", "brand-mark"));
         FlowPanel copy = panel("brand-copy");
         copy.add(text("MillodySingQueue", "brand-name"));
         copy.add(text("Every singer. Every song. Your night.", "brand-tagline"));
         brand.add(copy);
-        header.add(brand);
+        headerContent.add(brand);
         FlowPanel navigation = panel("main-navigation");
         navigation.getElement().setAttribute("role", "navigation");
         navigation.getElement().setAttribute("aria-label", "Main navigation");
         navigation.add(performancesLink);
         navigation.add(singersLink);
         navigation.add(songsLink);
-        header.add(navigation);
+        headerContent.add(navigation);
+        header.add(headerContent);
         shell.add(header);
         shell.add(screen);
         RootPanel.get("app").add(shell);
